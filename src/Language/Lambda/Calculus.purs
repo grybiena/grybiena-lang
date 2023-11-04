@@ -3,10 +3,11 @@ module Language.Lambda.Calculus where
 import Prelude
 
 import Data.Eq (class Eq1, eq1)
-import Data.Foldable (class Foldable, foldr)
+import Data.Foldable (class Foldable, foldMap, foldl, foldr)
 import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
+import Data.Traversable (class Traversable, traverse)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Prettier.Printer (DOC, text)
 
@@ -45,6 +46,29 @@ instance Functor cat => Functor (LambdaF pat var cat) where
   map f (App a b) = App (f a) (f b)
   map _ (Var i) = Var i
   map f (Cat c) = Cat (f <$> c)
+
+instance Foldable cat => Foldable (LambdaF pat var cat) where
+  foldr f b (Abs _ e) = f e b
+  foldr f b (App x y) = f y (f x b)
+  foldr _ b (Var _) = b
+  foldr f b (Cat c) = foldr f b c
+  foldl f b (Abs _ e) = f b e
+  foldl f b (App x y) = f (f b y) x
+  foldl _ b (Var _) = b
+  foldl f b (Cat c) = foldl f b c
+  foldMap f (Abs _ e) = f e
+  foldMap f (App x y) = f x <> f y
+  foldMap _ (Var _) = mempty
+  foldMap f (Cat c) = foldMap f c
+
+
+instance Traversable cat => Traversable (LambdaF pat var cat) where
+  traverse f (Abs p e) = Abs p <$> (f e)
+  traverse f (App a b) = App <$> f a <*> f b 
+  traverse _ (Var v) = pure (Var v)
+  traverse f (Cat c) = Cat <$> traverse f c
+  sequence = traverse identity
+
 
 class PrettyVar i where
   prettyVar :: i -> DOC
