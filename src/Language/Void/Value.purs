@@ -5,9 +5,7 @@ import Prelude
 import Control.Alt ((<|>))
 import Control.Lazy (defer)
 import Data.Eq (class Eq1)
-import Data.Functor.Mu (Mu(..))
-import Data.List (foldr)
-import Language.Lambda.Calculus (class PrettyLambda, Lambda, LambdaF(..), embedAbs, embedApp, embedVar, prettyVar)
+import Language.Lambda.Calculus (class PrettyLambda, Lambda, absMany, app, prettyVar, var)
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
 import Parsing (ParserT)
 import Parsing.Combinators (many1Till)
@@ -38,13 +36,13 @@ parseValue :: forall m . Monad m => ParserT String m Value
 parseValue = buildPostfixParser [parseApp] parseValueAtom 
 
 parseValueAtom :: forall m . Monad m => ParserT String m Value
-parseValueAtom = defer $ \_ -> parseAbs <|> embedVar identifier <|> (parens parseValue)
+parseValueAtom = defer $ \_ -> parseAbs <|> var <$> identifier <|> (parens parseValue)
 
 parseAbs :: forall m . Monad m => ParserT String m Value
-parseAbs = embedAbs parsePats parseValue
+parseAbs = absMany <$> parsePats <*> parseValue
   where
     parsePats = reservedOp "\\" *> many1Till identifier (reservedOp "->")
 
 parseApp :: forall m . Monad m => Value -> ParserT String m Value
-parseApp v = embedApp v parseValue
+parseApp v = app v <$> parseValue
 

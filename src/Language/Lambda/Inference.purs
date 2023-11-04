@@ -3,21 +3,19 @@ module Language.Lambda.Inference where
 import Prelude
 
 import Data.Functor.Mu (Mu(..))
-import Language.Lambda.Calculus (LambdaF(..))
+import Language.Lambda.Calculus (LambdaF(..), app, cat)
 
 
 class ArrowType t where
   arrowType :: t
 
-arrow :: forall p i c . ArrowType (c (Mu (LambdaF p i c)))
+
+arrow :: forall p i c .
+         ArrowType (c (Mu (LambdaF p i c)))
+      => Functor c
       => Mu (LambdaF p i c) -> Mu (LambdaF p i c) -> Mu (LambdaF p i c)
 arrow a b = (flip app a (cat arrowType)) `app` b
 
-cat :: forall p i c. c (Mu (LambdaF p i c)) -> Mu (LambdaF p i c)
-cat c = In (Cat c)
-
-app :: forall p i c . Mu (LambdaF p i c) -> Mu (LambdaF p i c) -> Mu (LambdaF p i c)
-app a b = In (App a b)
 
 class
   ( Monad m
@@ -64,6 +62,7 @@ check :: forall p v c i t m .
       => InferVar v i t m
       => InferCat p v c i t m
       => Unification i t m
+      => Functor t
       => Mu (LambdaF p v c) -> Mu (LambdaF i i t) -> m Unit
 check v t = do
   t' <- infer v
@@ -74,6 +73,7 @@ infer :: forall p v c i t m .
       => InferVar v i t m
       => InferCat p v c i t m
       => Unification i t m
+      => Functor t
       => Mu (LambdaF p v c) -> m (Mu (LambdaF i i t)) 
 infer (In val) =
   case val of
