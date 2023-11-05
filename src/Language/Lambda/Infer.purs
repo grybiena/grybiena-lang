@@ -68,6 +68,7 @@ class Supply typ m where
 
 class TypingContext var typ m | var -> typ where
   makeAssumption :: var -> typ -> m Unit
+  askEnvironment :: var -> m typ
 
 instance
   ( Monad m
@@ -75,4 +76,18 @@ instance
   , TypingContext var typ m
   ) => BindRule var m where
   bindRule v = fresh >>= makeAssumption v
+
+class TypingRelation :: Type -> Type -> Type -> (Type -> Type) -> Constraint
+class TypingRelation var exp typ jujF | var -> typ where
+  typingRelation :: var -> typ -> jujF exp
+
+instance
+  ( Monad m
+  , TypingContext var typ m
+  , TypingRelation var exp typ jujF
+  ) => VarRule var exp jujF m where 
+  varRule v = typingRelation v <$> askEnvironment v
+
+
+
 

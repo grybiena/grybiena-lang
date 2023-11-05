@@ -17,7 +17,7 @@ import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, Lambda, LambdaF(..), prettyVar)
-import Language.Lambda.Infer (class AbsRule, class AppRule, class CatRule, class Supply, class TypingContext, class VarRule, infer)
+import Language.Lambda.Infer (class AbsRule, class AppRule, class CatRule, class Supply, class TypingContext, class TypingRelation, class VarRule, askEnvironment, infer)
 import Language.Void.Value (Value, VoidF(..))
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Prettier.Printer (text, (<+>))
@@ -81,6 +81,9 @@ type Judgement = Mu (JudgementF String Type')
 
 data Typing exp typ = Typing exp typ
 
+instance TypingRelation var exp typ (JudgementF var typ) where
+  typingRelation = HasType
+
 class Assumption juj exp typ | juj -> exp, juj -> typ where
   assume :: juj -> Typing exp typ
 
@@ -142,6 +145,11 @@ instance Monad m => TypingContext String Type' (UnifyT m) where
      modify_ (\(UnificationState st) -> UnificationState st {
        typingAssumptions = Map.insert v t st.typingAssumptions
        })
+  askEnvironment v = do
+    UnificationState st <- get
+    case Map.lookup v st.typingAssumptions of
+      Just t -> pure t
+      Nothing -> throwError $ NotInScope v
 
 
 instance Monad m => Unification Type' String (UnifyT m) where
@@ -179,14 +187,6 @@ instance
           unify a t2
           pure $ JudgeApp e1 e2 b
        _ -> throwError $ InvalidApp t1 e2 
-
-
-instance Monad m => VarRule String Value (JudgementF String Type') (UnifyT m) where 
-  varRule v = do
-    UnificationState st <- get
-    case Map.lookup v st.typingAssumptions of
-      Just t -> pure $ HasType v t
-      Nothing -> throwError $ NotInScope v
 
 instance Monad m => CatRule VoidF Value (JudgementF String Type') m where 
   catRule (VoidF v) = absurd v
