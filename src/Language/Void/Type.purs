@@ -12,14 +12,15 @@ import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), maybe)
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
+import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested ((/\))
-import Language.Lambda.Calculus (class PrettyLambda, Lambda, LambdaF(..), prettyVar)
-import Language.Lambda.Infer (class AppRule, class CatRule, class Supply, class TypingAbstraction, class TypingContext, class TypingRelation, infer)
-import Language.Void.Value (Value, VoidF(..))
-import Matryoshka.Class.Recursive (class Recursive, project)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, app, prettyVar, var)
+import Language.Lambda.Infer (class AbsRule, class CatRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, fresh, infer, judgement, substitute, unify)
+import Language.Void.Value (ValVar, Value, VoidF(..))
+import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (pretty)
 
@@ -38,23 +39,31 @@ instance Functor TT where
 instance Eq (TT a) where
   eq  _ _ = true
 
-type Type' = Lambda String TT
+type Type' = Lambda TyVar TT
 
-instance PrettyLambda String TT where
+instance PrettyVar TyVar where
+  prettyVar (TyVar v) = text v
+
+instance PrettyLambda TyVar TT where
   prettyAbs i a = text "forall" <+> (prettyVar i <> text ".") <+> pretty a
-  prettyApp (In (App (In (Cat Arrow)) a)) b = pretty a <+> text "->" <+> pretty b
+  prettyApp (In (App (In (Cat Arrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"
   prettyApp f a = text "(" <+> pretty f <+> pretty a <+> text ")"
   prettyCat Arrow = text "->"
  
+newtype TyVar = TyVar String
+derive newtype instance Show TyVar
+derive newtype instance Ord TyVar
+derive newtype instance Eq TyVar
 
 newtype UnificationState =
   UnificationState {
     nextVar :: Int
-  , typingAssumptions :: Map String Type'
+  , typingAssumptions :: Map ValVar Type'
+  , currentSubstitution :: Map TyVar Type'
   }
 
 data UnificationError =
-    NotInScope String
+    NotInScope ValVar
   | Err String
   | InvalidApp Type' Value
   | UnificationError Type' Type' 
@@ -77,32 +86,29 @@ data JudgementF var typ a =
   | JudgeApp a a typ
   | JudgeAbs var a typ
 
-type Judgement = Mu (JudgementF String Type')
 
-data Typing exp typ = Typing exp typ
+type Judgement = Mu (JudgementF ValVar Type')
 
-instance TypingRelation var exp typ (JudgementF var typ) where
-  typingRelation = HasType
+instance VarRule var exp typ (JudgementF var typ) where
+  varRule = HasType
 
-instance TypingAbstraction String Value Type' Mu (JudgementF String Type') where
-  typingAbstraction b t j =
-    let Typing e ret = assume j
+instance AbsRule ValVar Value Type' Mu (JudgementF ValVar Type') where
+  absRule b t j =
+    let e /\ ret = judgement j
       in JudgeAbs b e (In (App (In (App (In (Cat Arrow)) t)) ret)) 
 
+instance TypingApplication Value Type' (JudgementF ValVar Type') where
+  typingApplication a b t = JudgeApp a b t
 
-class Assumption juj exp typ | juj -> exp, juj -> typ where
-  assume :: juj -> Typing exp typ
-
-
-instance Assumption Judgement Value Type' where
-  assume (In (HasType e t)) = Typing (In (Var e)) t
-  assume (In (JudgeApp a b t)) = 
-    let Typing e1 _ = assume a
-        Typing e2 _ = assume b
-     in Typing (In (App e1 e2)) t
-  assume (In (JudgeAbs a b t)) =
-    let Typing e2 _ = assume b
-     in Typing (In (Abs a e2)) t
+instance TypingJudgement Value Type' Mu (JudgementF ValVar Type') where
+  judgement (In (HasType e t)) = (In (Var e)) /\ t
+  judgement (In (JudgeApp a b t)) = 
+    let e1 /\ _ = judgement a
+        e2 /\ _ = judgement b
+     in (In (App e1 e2)) /\ t
+  judgement (In (JudgeAbs a b t)) =
+    let e2 /\ _ = judgement b
+     in (In (Abs a e2)) /\ t
 
 
 instance Functor (JudgementF exp typ) where
@@ -131,22 +137,24 @@ runInfer :: Value -> Either UnificationError Type'
 runInfer v = foo <$> runUnifyT (infer v)
   where
     foo :: Judgement -> Type'
-    foo j = let Typing _ t = assume j in t
+    foo j = let (_ :: Value) /\ t = judgement j in t
 
 runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a
-runUnifyT (UnifyT f) =  evalState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty })
-
+runUnifyT (UnifyT f) =  evalState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty })
 
 instance Monad m => Supply Type' (UnifyT m) where
+  fresh = var <$> fresh
+
+instance Monad m => Supply TyVar (UnifyT m) where
   fresh = do
     nextVar <- gets (\(UnificationState st) -> st.nextVar)
-    let t = In (Var ("t" <> show nextVar))
+    let t = TyVar ("t" <> show nextVar)
     modify_ (\(UnificationState st) -> UnificationState st {
                   nextVar = st.nextVar + 1
                 })
     pure t
 
-instance Monad m => TypingContext String Type' (UnifyT m) where
+instance Monad m => TypingContext ValVar Type' (UnifyT m) where
   makeAssumption v t =
      modify_ (\(UnificationState st) -> UnificationState st {
        typingAssumptions = Map.insert v t st.typingAssumptions
@@ -158,67 +166,104 @@ instance Monad m => TypingContext String Type' (UnifyT m) where
       Nothing -> throwError $ NotInScope v
 
 
-instance Monad m => Unification Type' String (UnifyT m) where
-  substitute _ _ = pure unit
-  lookupTermVariableAssumption v = do
-     UnificationState st <- get
-     case Map.lookup v st.typingAssumptions of
-       Just t -> pure t
-       Nothing -> throwError $ NotInScope v
-  unificationError t1 t2 = throwError $ UnificationError t1 t2
+--instance Monad m => Unification Type' String (UnifyT m) where
+--  substitute _ _ = pure unit
+--  lookupTermVariableAssumption v = do
+--     UnificationState st <- get
+--     case Map.lookup v st.typingAssumptions of
+--       Just t -> pure t
+--       Nothing -> throwError $ NotInScope v
+--  unificationError t1 t2 = throwError $ UnificationError t1 t2
 
 -----------------------------
 
 
 
-instance
-  ( Monad m
-  , Assumption Judgement Value Type' 
-  , Unification Type' String (UnifyT m)
-  ) => AppRule Value Mu (JudgementF String Type') (UnifyT m) where
-  appRule j1 j2 = do
-     let (Typing e1 t1) = assume j1
-         (Typing e2 t2) = assume j2
-     case t1 of
-       (In (App (In (App (In (Cat Arrow)) a)) b)) -> do
-          unify a t2
-          pure $ JudgeApp e1 e2 b
-       _ -> throwError $ InvalidApp t1 e2 
+--instance
+--  ( Monad m
+--  , Assumption Judgement Value Type' 
+--  , Unification Type' String (UnifyT m)
+--  ) => AppRule Value Mu (JudgementF String Type') (UnifyT m) where
+--  appRule j1 j2 = do
+--     let (Typing e1 t1) = assume j1
+--         (Typing e2 t2) = assume j2
+--     case t1 of
+--       (In (App (In (App (In (Cat Arrow)) a)) b)) -> do
+--          unify a t2
+--          pure $ JudgeApp e1 e2 b
+--       _ -> throwError $ InvalidApp t1 e2 
 
-instance Monad m => CatRule VoidF Value (JudgementF String Type') m where 
+instance Monad m => CatRule VoidF Value (JudgementF ValVar Type') m where 
   catRule (VoidF v) = absurd v
 
 
 
 ---- Language.Lambda.Unify
 
-class Unification typ var m | typ -> var where
-  substitute :: var -> typ -> m Unit
-  lookupTermVariableAssumption :: var -> m typ
---  applyCurrentSubstitution :: typ -> m typ
-  unificationError :: forall a . typ -> typ -> m a
+--class Unification typ var m | typ -> var where
+--  substitute :: var -> typ -> m Unit
+--  lookupTermVariableAssumption :: var -> m typ
+----  applyCurrentSubstitution :: typ -> m typ
+--  unificationError :: forall a . typ -> typ -> m a
+
+instance
+  ( Monad m
+  ) => Rewrite Type' (UnifyT m) where
+  applyCurrentSubstitution t =
+    case project t of
+      Var v -> do
+        UnificationState st <- get
+        maybe (pure t) pure (Map.lookup v st.currentSubstitution)
+      App a b -> do
+        a' <- applyCurrentSubstitution a
+        b' <- applyCurrentSubstitution b
+        pure $ app a' b'
+      Abs v a -> do
+        a' <- applyCurrentSubstitution a
+        -- TODO what if v gets substituted????
+        pure $ abs v a'
+      Cat _ -> pure t
+
+instance
+  ( Monad m
+  ) => Substitution TyVar Type' (UnifyT m) where
+  substitute v t = do
+     -- TODO what if there is an existing substitution?
+     -- we should unify
+     -- TODO apply substitution to all existing substitutions
+     modify_ (\(UnificationState st) -> UnificationState st {
+                currentSubstitution = Map.insert v t st.currentSubstitution
+              })
 
 
-
-unify :: forall typ var cat m.
-         Recursive typ (LambdaF var cat)
-      => Eq var
-      => Eq (cat typ)
-      => Monad m
-      => Unification typ var m
-      => typ -> typ -> m Unit
-unify ta tb = do
-   case project ta /\ project tb of
-     Var a /\ Var b | a == b -> pure unit
-     Var a /\ _ -> substitute a tb
-     _ /\ Var b -> substitute b ta
-     Abs ab aa /\ Abs bb ba -> do
---        unify ab bb
-        unify aa ba
-     App ab aa /\ App bb ba -> do
-        unify ab bb
-        unify aa ba
-     Cat ca /\ Cat cb | ca == cb -> pure unit
-     _ -> unificationError ta tb
-
-
+instance
+  ( Monad m
+  , Supply TyVar (UnifyT m)
+  , Substitution TyVar Type' (UnifyT m)
+  , Rewrite Type' (UnifyT m)
+  ) => Unify Type' (UnifyT m) where
+  unify ta tb = do
+     case project ta /\ project tb of
+       Var a /\ Var b | a == b -> pure ta
+       Var a /\ _ -> substitute a tb *> pure tb
+       _ /\ Var b -> substitute b ta *> pure ta
+       Abs ab aa /\ Abs bb ba -> do
+         qv <- fresh
+         let qty :: Type'
+             qty = var qv
+         substitute ab qty 
+         substitute bb qty 
+         ar <- applyCurrentSubstitution aa
+         br <- applyCurrentSubstitution ba
+         In <<< Abs qv <$> unify ar br
+       App ab aa /\ App bb ba -> do
+         In <$> (App <$> unify ab bb <*> unify aa ba)
+       Cat ca /\ Cat cb | ca == cb -> pure ta
+       _ -> throwError $ UnificationError ta tb
+  unifyWithArrow t = do
+     argTy <- var <$> fresh
+     retTy <- var <$> fresh
+     _ <- unify (In (App (In (App (In (Cat Arrow)) argTy)) retTy)) t     
+     Tuple <$> applyCurrentSubstitution argTy <*> applyCurrentSubstitution retTy
+  
+  

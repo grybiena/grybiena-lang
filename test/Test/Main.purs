@@ -22,7 +22,7 @@ main = runTest do
     testInferType "\\a b -> a" "t0 -> t1 -> t0"
     testInferType "\\a b -> b" "t0 -> t1 -> t1"
     testInferType "\\a b -> a b" "(t0 -> t1) -> t0 -> t1"
---    testInferType "\\a b -> b a" "t0 -> (t0 -> t1) -> t1"
+    testInferType "\\a b -> b a" "t0 -> (t0 -> t1) -> t1"
 
 
 
