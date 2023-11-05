@@ -9,54 +9,48 @@ import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Coalgebra (CoalgebraM)
 import Matryoshka.Unfold (anaM)
 
-class BindRule var m where
-  bindRule :: var -> m Unit
-
-class AbsRule :: Type -> Type -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
-class AbsRule var exp juj jujF m | exp -> juj where
-  absRule :: var -> juj -> m (jujF exp)
-
-class AppRule :: Type -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
-class AppRule exp juj jujF m | exp -> juj where
-  appRule :: juj -> juj -> m (jujF exp)
+class AppRule :: forall k1 k2. k1 -> ((k1 -> k2) -> Type) -> (k1 -> k2) -> (k2 -> Type) -> Constraint
+class AppRule exp f jujF m | exp -> f jujF where
+  appRule :: f jujF -> f jujF -> m (jujF exp)
  
-class VarRule :: Type -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
-class VarRule var exp jujF m where
-  varRule :: var -> m (jujF exp)
-
-class CatRule :: (Type -> Type) -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
+class CatRule :: forall k1 k2. (k1 -> Type) -> k1 -> (k1 -> k2) -> (k2 -> Type) -> Constraint
 class CatRule cat exp jujF m where
   catRule :: cat exp -> m (jujF exp)
 
-infer :: forall juj jujF m exp var cat.
-          Corecursive juj jujF
+infer :: forall f jujF m exp var cat typ.
+          Corecursive (f jujF) jujF
        => Monad m
        => Traversable jujF
        => Recursive exp (LambdaF var cat)
-       => BindRule var m
-       => AbsRule var exp juj jujF m
-       => AppRule exp juj jujF m
-       => VarRule var exp jujF m
+       => AppRule exp f jujF m
        => CatRule cat exp jujF m
-       => exp -> m juj
+       => Supply typ m
+       => TypingContext var typ m
+       => TypingAbstraction var exp typ f jujF
+       => TypingRelation var exp typ jujF
+       => exp -> m (f jujF)
 infer exp = anaM judge exp 
 
-judge :: forall juj jujF m exp var cat.
-         Corecursive juj jujF
+judge :: forall f jujF m exp var cat typ.
+         Corecursive (f jujF) jujF
       => Monad m
       => Traversable jujF
       => Recursive exp (LambdaF var cat)
-      => BindRule var m
-      => AbsRule var exp juj jujF m
-      => AppRule exp juj jujF m
-      => VarRule var exp jujF m
+      => AppRule exp f jujF m
       => CatRule cat exp jujF m
+      => Supply typ m
+      => TypingContext var typ m
+      => TypingAbstraction var exp typ f jujF
+      => TypingRelation var exp typ jujF
       => CoalgebraM m jujF exp
 judge e =
   case project e of
-    Abs b a -> bindRule b *> join (absRule b <$> infer a)
+    Abs b a -> do
+       t <- fresh
+       makeAssumption b t
+       typingAbstraction b t <$> infer a
     App f a -> join $ appRule <$> infer f <*> infer a
-    Var v -> varRule v
+    Var v -> typingRelation v <$> askEnvironment v
     Cat c -> catRule c
 
 
@@ -70,35 +64,11 @@ class TypingContext var typ m | var -> typ where
   makeAssumption :: var -> typ -> m Unit
   askEnvironment :: var -> m typ
 
-instance
-  ( Monad m
-  , Supply typ m
-  , TypingContext var typ m
-  ) => BindRule var m where
-  bindRule v = fresh >>= makeAssumption v
-
 class TypingRelation :: Type -> Type -> Type -> (Type -> Type) -> Constraint
 class TypingRelation var exp typ jujF | var -> typ where
   typingRelation :: var -> typ -> jujF exp
 
-instance
-  ( Monad m
-  , TypingContext var typ m
-  , TypingRelation var exp typ jujF
-  ) => VarRule var exp jujF m where 
-  varRule v = typingRelation v <$> askEnvironment v
-
-
-class TypingAbstraction var exp typ juj jujF | var -> typ where
-  typingAbstraction :: var -> typ -> juj -> jujF exp
-
-instance
-  ( Monad m
-  , TypingContext var typ m
-  , TypingAbstraction var exp typ juj jujF
-  ) => AbsRule var exp juj jujF m where
-  absRule b j = typingAbstraction b <$> askEnvironment b <*> pure j
-
-
-
+class TypingAbstraction :: Type -> Type -> Type -> ((Type -> Type) -> Type) -> (Type -> Type) -> Constraint
+class TypingAbstraction var exp typ f jujF | var -> typ where
+  typingAbstraction :: var -> typ -> f jujF -> jujF exp
 

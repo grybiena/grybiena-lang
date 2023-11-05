@@ -84,7 +84,7 @@ data Typing exp typ = Typing exp typ
 instance TypingRelation var exp typ (JudgementF var typ) where
   typingRelation = HasType
 
-instance TypingAbstraction String Value Type' (Mu (JudgementF String Type')) (JudgementF String Type') where
+instance TypingAbstraction String Value Type' Mu (JudgementF String Type') where
   typingAbstraction b t j =
     let Typing e ret = assume j
       in JudgeAbs b e (In (App (In (App (In (Cat Arrow)) t)) ret)) 
@@ -175,7 +175,7 @@ instance
   ( Monad m
   , Assumption Judgement Value Type' 
   , Unification Type' String (UnifyT m)
-  ) => AppRule Value Judgement (JudgementF String Type') (UnifyT m) where
+  ) => AppRule Value Mu (JudgementF String Type') (UnifyT m) where
   appRule j1 j2 = do
      let (Typing e1 t1) = assume j1
          (Typing e2 t2) = assume j2
