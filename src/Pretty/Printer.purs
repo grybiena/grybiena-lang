@@ -9,7 +9,7 @@ import Prettier.Printer as PP
 class Pretty a where
   pretty :: a -> DOC 
 
-instance PrettyLambda pat var cat => Pretty (Lambda pat var cat) where
+instance PrettyLambda var cat => Pretty (Lambda var cat) where
   pretty (In l) =
     case l of
       Abs i a -> prettyAbs i a

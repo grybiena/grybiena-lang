@@ -24,9 +24,9 @@ instance Eq1 VoidF where
 instance Functor VoidF where
   map _ (VoidF v) = absurd v
 
-type Value = Lambda String String VoidF
+type Value = Lambda String VoidF
 
-instance PrettyLambda String String VoidF where
+instance PrettyLambda String VoidF where
   prettyAbs i a = (text "\\" <> prettyVar i) <+> text "->" <+> pretty a
   prettyApp f a = text "(" <+> pretty f <+> pretty a <+> text ")"
   prettyCat (VoidF v) = absurd v

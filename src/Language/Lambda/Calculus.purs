@@ -12,21 +12,20 @@ import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Prettier.Printer (DOC, text)
 
 -- | Un-Fixed LambdaF 
-data LambdaF pat var cat a =
-    Abs pat a
+data LambdaF var cat a =
+    Abs var a
   | App a a
   | Var var
   | Cat (cat a)
 
-type Lambda pat var cat = Mu (LambdaF pat var cat)
+type Lambda var cat = Mu (LambdaF var cat)
 
-derive instance Generic (LambdaF pat var cat a) _
+derive instance Generic (LambdaF var cat a) _
 
 instance
-  ( Eq pat
-  , Eq var
+  ( Eq var
   , Eq1 cat
-  ) => Eq1 (LambdaF pat var cat) where
+  ) => Eq1 (LambdaF var cat) where
   eq1 (Abs i _) (Abs j _) = i == j
   eq1 (App _ _) (App _ _) = true
   eq1 (Var i) (Var j) = i == j
@@ -34,20 +33,19 @@ instance
   eq1 _ _ = false
 
 instance
-  ( Show pat
-  , Show var
+  ( Show var
   , Show (cat a)
   , Show a
-  ) => Show (LambdaF pat var cat a) where
+  ) => Show (LambdaF var cat a) where
   show = genericShow
 
-instance Functor cat => Functor (LambdaF pat var cat) where
+instance Functor cat => Functor (LambdaF var cat) where
   map f (Abs i a) = Abs i (f a)
   map f (App a b) = App (f a) (f b)
   map _ (Var i) = Var i
   map f (Cat c) = Cat (f <$> c)
 
-instance Foldable cat => Foldable (LambdaF pat var cat) where
+instance Foldable cat => Foldable (LambdaF var cat) where
   foldr f b (Abs _ e) = f e b
   foldr f b (App x y) = f y (f x b)
   foldr _ b (Var _) = b
@@ -62,7 +60,7 @@ instance Foldable cat => Foldable (LambdaF pat var cat) where
   foldMap f (Cat c) = foldMap f c
 
 
-instance Traversable cat => Traversable (LambdaF pat var cat) where
+instance Traversable cat => Traversable (LambdaF var cat) where
   traverse f (Abs p e) = Abs p <$> (f e)
   traverse f (App a b) = App <$> f a <*> f b 
   traverse _ (Var v) = pure (Var v)
@@ -76,38 +74,38 @@ class PrettyVar i where
 instance PrettyVar String where
   prettyVar = text
 
-class (PrettyVar pat, PrettyVar var) <= PrettyLambda pat var cat where
-  prettyAbs :: pat -> Lambda pat var cat -> DOC
-  prettyApp :: Lambda pat var cat -> Lambda pat var cat -> DOC
-  prettyCat :: cat (Lambda pat var cat) -> DOC
+class PrettyVar var <= PrettyLambda var cat where
+  prettyAbs :: var -> Lambda var cat -> DOC
+  prettyApp :: Lambda var cat -> Lambda var cat -> DOC
+  prettyCat :: cat (Lambda var cat) -> DOC
 
 
-absMany :: forall t lam pat var cat .
-           Corecursive lam (LambdaF pat var cat)
+absMany :: forall t lam var cat .
+           Corecursive lam (LambdaF var cat)
         => Functor t
         => Foldable t
-        => t pat -> lam -> lam
+        => t var -> lam -> lam
 absMany ps = flip (foldr ($)) (abs <$> ps) 
 
-abs :: forall lam pat var cat .
-       Corecursive lam (LambdaF pat var cat)
-    => pat -> lam -> lam
+abs :: forall lam var cat .
+       Corecursive lam (LambdaF var cat)
+    => var -> lam -> lam
 abs p = embed <<< Abs p
 
 
-app :: forall lam pat var cat .
-       Corecursive lam (LambdaF pat var cat)
+app :: forall lam var cat .
+       Corecursive lam (LambdaF var cat)
     => lam -> lam -> lam
 app a = embed <<< App a
 
 
-var :: forall lam pat var cat .
-       Corecursive lam (LambdaF pat var cat)
+var :: forall lam var cat .
+       Corecursive lam (LambdaF var cat)
     => var -> lam
 var = embed <<< Var
 
-cat :: forall lam pat var cat .
-       Corecursive lam (LambdaF pat var cat)
+cat :: forall lam var cat .
+       Corecursive lam (LambdaF var cat)
     => cat lam -> lam 
 cat = embed <<< Cat
 
