@@ -2,7 +2,6 @@ module Language.Lambda.Infer where
 
 import Prelude
 
-import Control.Monad.Writer (class MonadTell, tell)
 import Data.Traversable (class Traversable)
 import Language.Lambda.Calculus (LambdaF(..))
 import Matryoshka.Class.Corecursive (class Corecursive)
@@ -10,48 +9,53 @@ import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Coalgebra (CoalgebraM)
 import Matryoshka.Unfold (anaM)
 
--- | A Typing assumption of the form `x:t" meaning _x_ has type _t_
-data Typing x t = Typing x t
-
-class BindPat :: Type -> Type -> (Type -> Type) -> Constraint
-class BindPat var typ m where
-  bindPat :: var -> m (Typing var typ)
+class BindRule var m where
+  bindRule :: var -> m Unit
 
 class AbsRule :: Type -> Type -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
-class AbsRule var exp typ juj m | exp -> typ where
-  absRule :: Typing var typ -> Typing exp typ -> m (juj exp)
+class AbsRule var exp juj jujF m | exp -> juj where
+  absRule :: var -> juj -> m (jujF exp)
 
 class AppRule :: Type -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
-class AppRule exp typ juj m | exp -> typ where
-  appRule :: Typing exp typ -> Typing exp typ -> m (juj exp)
+class AppRule exp juj jujF m | exp -> juj where
+  appRule :: juj -> juj -> m (jujF exp)
  
 class VarRule :: Type -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
-class VarRule var exp juj m where
-  varRule :: var -> m (juj exp)
+class VarRule var exp jujF m where
+  varRule :: var -> m (jujF exp)
 
 class CatRule :: (Type -> Type) -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
-class CatRule cat exp juj m where
-  catRule :: cat exp -> m (juj exp)
+class CatRule cat exp jujF m where
+  catRule :: cat exp -> m (jujF exp)
 
-infer :: forall typ juj m exp var cat.
-          Corecursive typ juj
+infer :: forall juj jujF m exp var cat.
+          Corecursive juj jujF
        => Monad m
-       => Traversable juj
+       => Traversable jujF
        => Recursive exp (LambdaF var cat)
-       => BindPat var typ m
-       => AbsRule var exp typ juj m
-       => AppRule exp typ juj m
-       => VarRule var exp juj m
-       => CatRule cat exp juj m
-       => MonadTell (juj exp) m
-       => exp -> m (Typing exp typ)
-infer exp = Typing exp <$> anaM go exp 
-  where
-    ju j = tell j *> pure j
-    go :: CoalgebraM m juj exp
-    go e = ju =<< case project e of
-      Abs b a -> join $ absRule <$> bindPat b <*> infer a
-      App f a -> join $ appRule <$> infer f <*> infer a
-      Var v -> varRule v
-      Cat c -> catRule c
- 
+       => BindRule var m
+       => AbsRule var exp juj jujF m
+       => AppRule exp juj jujF m
+       => VarRule var exp jujF m
+       => CatRule cat exp jujF m
+       => exp -> m juj
+infer exp = anaM judge exp 
+
+judge :: forall juj jujF m exp var cat.
+         Corecursive juj jujF
+      => Monad m
+      => Traversable jujF
+      => Recursive exp (LambdaF var cat)
+      => BindRule var m
+      => AbsRule var exp juj jujF m
+      => AppRule exp juj jujF m
+      => VarRule var exp jujF m
+      => CatRule cat exp jujF m
+      => CoalgebraM m jujF exp
+judge e =
+  case project e of
+    Abs b a -> bindRule b *> join (absRule b <$> infer a)
+    App f a -> join $ appRule <$> infer f <*> infer a
+    Var v -> varRule v
+    Cat c -> catRule c
+
