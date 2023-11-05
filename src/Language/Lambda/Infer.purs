@@ -89,5 +89,16 @@ instance
   varRule v = typingRelation v <$> askEnvironment v
 
 
+class TypingAbstraction var exp typ juj jujF | var -> typ where
+  typingAbstraction :: var -> typ -> juj -> jujF exp
+
+instance
+  ( Monad m
+  , TypingContext var typ m
+  , TypingAbstraction var exp typ juj jujF
+  ) => AbsRule var exp juj jujF m where
+  absRule b j = typingAbstraction b <$> askEnvironment b <*> pure j
+
+
 
 

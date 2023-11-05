@@ -17,7 +17,7 @@ import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, Lambda, LambdaF(..), prettyVar)
-import Language.Lambda.Infer (class AbsRule, class AppRule, class CatRule, class Supply, class TypingContext, class TypingRelation, class VarRule, askEnvironment, infer)
+import Language.Lambda.Infer (class AppRule, class CatRule, class Supply, class TypingAbstraction, class TypingContext, class TypingRelation, infer)
 import Language.Void.Value (Value, VoidF(..))
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Prettier.Printer (text, (<+>))
@@ -83,6 +83,12 @@ data Typing exp typ = Typing exp typ
 
 instance TypingRelation var exp typ (JudgementF var typ) where
   typingRelation = HasType
+
+instance TypingAbstraction String Value Type' (Mu (JudgementF String Type')) (JudgementF String Type') where
+  typingAbstraction b t j =
+    let Typing e ret = assume j
+      in JudgeAbs b e (In (App (In (App (In (Cat Arrow)) t)) ret)) 
+
 
 class Assumption juj exp typ | juj -> exp, juj -> typ where
   assume :: juj -> Typing exp typ
@@ -163,15 +169,6 @@ instance Monad m => Unification Type' String (UnifyT m) where
 
 -----------------------------
 
-
-instance
-  ( Monad m
-  , Assumption Judgement Value Type'
-  ) => AbsRule String Value Judgement (JudgementF String Type') (UnifyT m) where
-  absRule b j2 = do
-    t1 <- lookupTermVariableAssumption b
-    let Typing e2 t2 = assume j2
-    pure $ JudgeAbs b e2 (In (App (In (App (In (Cat Arrow)) t1)) t2)) 
 
 
 instance
