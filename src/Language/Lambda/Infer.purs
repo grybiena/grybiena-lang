@@ -2,6 +2,8 @@ module Language.Lambda.Infer where
 
 import Prelude
 
+import Control.Monad.Writer (class MonadTell, tell)
+import Data.List (List, singleton)
 import Data.Traversable (class Traversable)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF(..))
@@ -38,8 +40,11 @@ infer :: forall f jujF m exp var cat typ.
        => TypingContext var typ m
        => AbsRule var exp typ f jujF
        => VarRule var exp typ jujF
+       => MonadTell (List (f jujF)) m
        => exp -> m (f jujF)
-infer exp = anaM judge exp 
+infer exp = anaM judge exp >>= trace
+  where
+    trace i = tell (singleton i) *> pure i
 
 judge :: forall f jujF m exp var cat typ.
          Corecursive (f jujF) jujF
@@ -53,6 +58,7 @@ judge :: forall f jujF m exp var cat typ.
       => TypingContext var typ m
       => AbsRule var exp typ f jujF
       => VarRule var exp typ jujF
+      => MonadTell (List (f jujF)) m
       => CoalgebraM m jujF exp
 judge e =
   case project e of

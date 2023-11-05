@@ -5,18 +5,20 @@ import Prelude
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Except.Trans (class MonadThrow)
 import Control.Monad.State (class MonadState, StateT, evalState, get, gets, modify_)
+import Control.Monad.Writer (class MonadTell, WriterT, runWriterT)
 import Data.Either (Either)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity)
+import Data.List (List)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), maybe)
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
-import Data.Tuple (Tuple(..))
-import Data.Tuple.Nested ((/\))
+import Data.Tuple (Tuple(..), fst)
+import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, app, prettyVar, var)
 import Language.Lambda.Infer (class AbsRule, class CatRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, fresh, infer, judgement, substitute, unify)
 import Language.Void.Value (ValVar, Value, VoidF(..))
@@ -72,12 +74,13 @@ derive instance Generic UnificationError _
 instance Show UnificationError where
   show = genericShow
 
-newtype UnifyT m a = UnifyT (ExceptT UnificationError (StateT UnificationState m) a)
+newtype UnifyT m a = UnifyT (ExceptT UnificationError (WriterT (List Judgement) (StateT UnificationState m)) a)
 derive newtype instance Functor m => Functor (UnifyT m)
 derive newtype instance Monad m => Apply (UnifyT m)
 derive newtype instance Monad m => Applicative (UnifyT m)
 derive newtype instance Monad m => Bind (UnifyT m)
 derive newtype instance Monad m => Monad (UnifyT m)
+derive newtype instance Monad m => MonadTell (List Judgement) (UnifyT m)
 derive newtype instance Monad m => MonadState UnificationState (UnifyT m)
 derive newtype instance Monad m => MonadThrow UnificationError (UnifyT m)
 
@@ -133,14 +136,17 @@ instance Traversable (JudgementF exp typ) where
   traverse f (JudgeAbs a b t) = (\tb -> JudgeAbs a tb t) <$> f b
   sequence = traverse identity
 
+runInfer' :: Value -> Either UnificationError Judgement /\ List Judgement
+runInfer' v = runUnifyT (infer v)
+
 runInfer :: Value -> Either UnificationError Type'
-runInfer v = foo <$> runUnifyT (infer v)
+runInfer v = foo <$> (fst $ runUnifyT (infer v))
   where
     foo :: Judgement -> Type'
     foo j = let (_ :: Value) /\ t = judgement j in t
 
-runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a
-runUnifyT (UnifyT f) =  evalState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty })
+runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a /\ List Judgement
+runUnifyT (UnifyT f) =  evalState (runWriterT (runExceptT f)) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty })
 
 instance Monad m => Supply Type' (UnifyT m) where
   fresh = var <$> fresh
