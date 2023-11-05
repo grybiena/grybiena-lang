@@ -17,7 +17,7 @@ import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, Lambda, LambdaF(..), prettyVar)
-import Language.Lambda.Infer (class AbsRule, class AppRule, class BindRule, class CatRule, class VarRule, infer)
+import Language.Lambda.Infer (class AbsRule, class AppRule, class CatRule, class Supply, class TypingContext, class VarRule, infer)
 import Language.Void.Value (Value, VoidF(..))
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Prettier.Printer (text, (<+>))
@@ -50,7 +50,7 @@ instance PrettyLambda String TT where
 newtype UnificationState =
   UnificationState {
     nextVar :: Int
-  , termVariableTypingAssumptions :: Map String Type'
+  , typingAssumptions :: Map String Type'
   }
 
 data UnificationError =
@@ -125,15 +125,36 @@ runInfer v = foo <$> runUnifyT (infer v)
     foo j = let Typing _ t = assume j in t
 
 runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a
-runUnifyT (UnifyT f) =  evalState (runExceptT f) (UnificationState { nextVar: 0, termVariableTypingAssumptions: Map.empty })
+runUnifyT (UnifyT f) =  evalState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty })
 
-instance
-  ( Monad m
-  , Unification Type' String (UnifyT m)
-  ) => BindRule String (UnifyT m) where
-  bindRule v = do
-    t <- fresh
-    makeTermVariableAssumption v (t :: Type')
+
+instance Monad m => Supply Type' (UnifyT m) where
+  fresh = do
+    nextVar <- gets (\(UnificationState st) -> st.nextVar)
+    let t = In (Var ("t" <> show nextVar))
+    modify_ (\(UnificationState st) -> UnificationState st {
+                  nextVar = st.nextVar + 1
+                })
+    pure t
+
+instance Monad m => TypingContext String Type' (UnifyT m) where
+  makeAssumption v t =
+     modify_ (\(UnificationState st) -> UnificationState st {
+       typingAssumptions = Map.insert v t st.typingAssumptions
+       })
+
+
+instance Monad m => Unification Type' String (UnifyT m) where
+  substitute _ _ = pure unit
+  lookupTermVariableAssumption v = do
+     UnificationState st <- get
+     case Map.lookup v st.typingAssumptions of
+       Just t -> pure t
+       Nothing -> throwError $ NotInScope v
+  unificationError t1 t2 = throwError $ UnificationError t1 t2
+
+-----------------------------
+
 
 instance
   ( Monad m
@@ -144,27 +165,6 @@ instance
     let Typing e2 t2 = assume j2
     pure $ JudgeAbs b e2 (In (App (In (App (In (Cat Arrow)) t1)) t2)) 
 
-
-
-instance Monad m => Unification Type' String (UnifyT m) where
-  substitute _ _ = pure unit
-  fresh = do
-    nextVar <- gets (\(UnificationState st) -> st.nextVar)
-    let t = In (Var ("t" <> show nextVar))
-    modify_ (\(UnificationState st) -> UnificationState st {
-                  nextVar = st.nextVar + 1
-                })
-    pure t
-  makeTermVariableAssumption v t = do
-     modify_ (\(UnificationState st) -> UnificationState st {
-       termVariableTypingAssumptions = Map.insert v t st.termVariableTypingAssumptions
-       })
-  lookupTermVariableAssumption v = do
-     UnificationState st <- get
-     case Map.lookup v st.termVariableTypingAssumptions of
-       Just t -> pure t
-       Nothing -> throwError $ NotInScope v
-  unificationError t1 t2 = throwError $ UnificationError t1 t2
 
 instance
   ( Monad m
@@ -184,7 +184,7 @@ instance
 instance Monad m => VarRule String Value (JudgementF String Type') (UnifyT m) where 
   varRule v = do
     UnificationState st <- get
-    case Map.lookup v st.termVariableTypingAssumptions of
+    case Map.lookup v st.typingAssumptions of
       Just t -> pure $ HasType v t
       Nothing -> throwError $ NotInScope v
 
@@ -192,12 +192,11 @@ instance Monad m => CatRule VoidF Value (JudgementF String Type') m where
   catRule (VoidF v) = absurd v
 
 
+
 ---- Language.Lambda.Unify
 
 class Unification typ var m | typ -> var where
   substitute :: var -> typ -> m Unit
-  fresh :: m typ
-  makeTermVariableAssumption :: var -> typ -> m Unit
   lookupTermVariableAssumption :: var -> m typ
 --  applyCurrentSubstitution :: typ -> m typ
   unificationError :: forall a . typ -> typ -> m a

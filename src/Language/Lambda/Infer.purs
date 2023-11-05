@@ -59,3 +59,20 @@ judge e =
     Var v -> varRule v
     Cat c -> catRule c
 
+
+----
+
+class Supply :: Type -> (Type -> Type) -> Constraint
+class Supply typ m where
+  fresh :: m typ
+
+class TypingContext var typ m | var -> typ where
+  makeAssumption :: var -> typ -> m Unit
+
+instance
+  ( Monad m
+  , Supply typ m
+  , TypingContext var typ m
+  ) => BindRule var m where
+  bindRule v = fresh >>= makeAssumption v
+
