@@ -181,21 +181,6 @@ instance Monad m => TypingContext ValVar Type' (UnifyT m) where
 
 instance
   ( Monad m
-  ) => Rewrite Judgement (UnifyT m) where
-  applyCurrentSubstitution j =
-    case project j of
-      HasType v t -> In <<< HasType v <$> applyCurrentSubstitution t
-      JudgeApp a b t -> do
-        a' <- applyCurrentSubstitution a
-        b' <- applyCurrentSubstitution b
-        In <<< JudgeApp a' b' <$> applyCurrentSubstitution t
-      JudgeAbs v a t -> do
-        a' <- applyCurrentSubstitution a
-        In <<< JudgeAbs v a' <$> applyCurrentSubstitution t
-
-
-instance
-  ( Monad m
   ) => Rewrite Type' (UnifyT m) where
   applyCurrentSubstitution t =
     case project t of
@@ -215,13 +200,47 @@ instance
 instance
   ( Monad m
   ) => Substitution TyVar Type' (UnifyT m) where
-  substitute v t = do
+  substitute v t' = do
+
+     t <- applyCurrentSubstitution t'
+     occursCheck v t
+     u <- applyCurrentSubstitution (var v)
+     case project u of
+        Var v' | v' == v -> pure unit 
+        _ -> do
+          void $ unify u t
      -- TODO what if there is an existing substitution?
      -- we should unify
      -- TODO apply substitution to all existing substitutions
      modify_ (\(UnificationState st) -> UnificationState st {
-                currentSubstitution = Map.insert v t st.currentSubstitution
+                currentSubstitution = Map.insert v t (rewrite (\x -> if x == v then t else var x) <$> st.currentSubstitution)
               })
+
+rewrite :: (TyVar -> Type') -> Type' -> Type'
+rewrite f t =
+  case project t of
+    Var v -> f v
+    App a b -> app (rewrite f a) (rewrite f b)
+    Abs v a -> abs v (rewrite f a)
+      -- TODO what if v gets substituted????
+    Cat _ -> t
+
+
+
+
+occursCheck :: forall m. Monad m => TyVar -> Type' -> UnifyT m Unit
+occursCheck u t = do
+  case project t of
+    Var v -> do
+      when (u == v) $ throwError $ Err "Occurs check"
+    App a b -> do
+      occursCheck u a
+      occursCheck u b
+    Abs v a -> do
+      when (u == v) $ throwError $ Err "Occurs check"
+      occursCheck u a
+    Cat _ -> pure unit
+
 
 
 instance
@@ -253,5 +272,6 @@ instance
      retTy <- var <$> fresh
      _ <- unify (In (App (In (App (In (Cat Arrow)) argTy)) retTy)) t     
      Tuple <$> applyCurrentSubstitution argTy <*> applyCurrentSubstitution retTy
+
   
   

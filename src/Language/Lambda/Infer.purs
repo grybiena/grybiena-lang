@@ -19,7 +19,7 @@ infer :: forall exp var cat m typ jujF juj.
       => Monad m
       => Supply typ m
       => TypingContext var typ m
-      => Rewrite juj m
+      => Rewrite typ m
       => AbsRule var typ jujF juj
       => AppRule jujF juj m
       => VarRule var typ (jujF juj)
@@ -33,20 +33,21 @@ judge :: forall var cat m typ jujF juj.
       => Corecursive juj jujF
       => Supply typ m
       => TypingContext var typ m
-      => Rewrite juj m
+      => Rewrite typ m
       => AbsRule var typ jujF juj
       => AppRule jujF juj m
       => VarRule var typ (jujF juj)
       => CatRule cat (m juj)
       => Reckon juj m
       => Algebra (LambdaF var cat) (m juj) 
-judge lam = reckon $ applyCurrentSubstitution =<<
+judge lam = reckon 
   case lam of
     Abs binding inferBody -> do
        tyBind <- fresh
        makeAssumption binding tyBind
        tyBody <- inferBody
-       pure $ embed $ absRule binding tyBind tyBody
+       tyBind' <- applyCurrentSubstitution tyBind 
+       pure $ embed $ absRule binding tyBind' tyBody
     App f a -> embed <$> (join $ appRule <$> f <*> a)
     Var v -> embed <<< varRule v <$> askEnvironment v
     Cat c -> catRule c
@@ -74,13 +75,14 @@ instance
   , Recursive juj jujF
   , TypingJudgement exp typ jujF juj
   , TypingApplication typ jujF juj
+  , Rewrite typ m
   , Unify typ m
   ) => AppRule jujF juj m where
   appRule f a = do
     let _ /\ arrTy = judgement $ project f
     arrArg /\ arrRet <- unifyWithArrow arrTy
     let _ /\ argTy = judgement $ project a
-    void $ unify argTy arrArg 
+    void $ unify arrArg argTy
     pure $ typingApplication f a arrRet
 
 --------------
