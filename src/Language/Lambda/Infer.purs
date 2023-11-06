@@ -19,7 +19,7 @@ infer :: forall exp var cat m typ jujF juj.
       => Monad m
       => Supply typ m
       => TypingContext var typ m
-      => Rewrite typ m
+      => Rewrite juj m
       => AbsRule var typ jujF juj
       => AppRule jujF juj m
       => VarRule var typ (jujF juj)
@@ -33,23 +33,22 @@ judge :: forall var cat m typ jujF juj.
       => Corecursive juj jujF
       => Supply typ m
       => TypingContext var typ m
-      => Rewrite typ m
+      => Rewrite juj m
       => AbsRule var typ jujF juj
       => AppRule jujF juj m
       => VarRule var typ (jujF juj)
       => CatRule cat (m juj)
       => Reckon juj m
       => Algebra (LambdaF var cat) (m juj) 
-judge lam = reckon
+judge lam = reckon $ applyCurrentSubstitution =<<
   case lam of
     Abs binding inferBody -> do
        tyBind <- fresh
        makeAssumption binding tyBind
        tyBody <- inferBody
-       tyBind' <- applyCurrentSubstitution tyBind
-       pure $ embed $ absRule binding tyBind' tyBody
+       pure $ embed $ absRule binding tyBind tyBody
     App f a -> embed <$> (join $ appRule <$> f <*> a)
-    Var v -> embed <<< varRule v <$> (askEnvironment v >>= applyCurrentSubstitution)
+    Var v -> embed <<< varRule v <$> askEnvironment v
     Cat c -> catRule c
 
 class AbsRule var typ jujF juj where
@@ -75,7 +74,6 @@ instance
   , Recursive juj jujF
   , TypingJudgement exp typ jujF juj
   , TypingApplication typ jujF juj
-  , Rewrite typ m
   , Unify typ m
   ) => AppRule jujF juj m where
   appRule f a = do
@@ -83,8 +81,7 @@ instance
     arrArg /\ arrRet <- unifyWithArrow arrTy
     let _ /\ argTy = judgement $ project a
     void $ unify argTy arrArg 
-    appTy <- applyCurrentSubstitution arrRet
-    pure $ typingApplication f a appTy
+    pure $ typingApplication f a arrRet
 
 --------------
 
@@ -100,7 +97,7 @@ class Unify typ m where
   unify :: typ -> typ -> m typ
   unifyWithArrow :: typ -> m (typ /\ typ)
 
-class Corecursive juj jujF <= TypingJudgement exp typ jujF juj | juj -> exp, juj -> typ where 
+class Corecursive juj jujF <= TypingJudgement exp typ jujF juj | jujF -> exp, jujF -> typ where 
   judgement :: jujF juj -> exp /\ typ
 
 class Corecursive juj jujF <= TypingApplication typ jujF juj where

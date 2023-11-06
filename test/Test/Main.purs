@@ -25,7 +25,7 @@ import Test.Unit.Main (runTest)
 main :: Effect Unit
 main = runTest do
   suite "Language.Void" do
-    unfurl "\\a b c -> a b c" 
+    unfurl "\\a b c -> c b a" 
 
 tests :: Effect Unit
 tests = runTest do

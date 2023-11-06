@@ -33,9 +33,6 @@ data TT :: forall k. k -> Type
 data TT a =
   Arrow 
 
---instance ArrowType (TT a) where
---  arrowType = Arrow
-
 derive instance Generic (TT a) _
 instance Show (TT a) where
   show = genericShow
@@ -182,44 +179,20 @@ instance Monad m => TypingContext ValVar Type' (UnifyT m) where
       Just t -> pure t
       Nothing -> throwError $ NotInScope v
 
+instance
+  ( Monad m
+  ) => Rewrite Judgement (UnifyT m) where
+  applyCurrentSubstitution j =
+    case project j of
+      HasType v t -> In <<< HasType v <$> applyCurrentSubstitution t
+      JudgeApp a b t -> do
+        a' <- applyCurrentSubstitution a
+        b' <- applyCurrentSubstitution b
+        In <<< JudgeApp a' b' <$> applyCurrentSubstitution t
+      JudgeAbs v a t -> do
+        a' <- applyCurrentSubstitution a
+        In <<< JudgeAbs v a' <$> applyCurrentSubstitution t
 
---instance Monad m => Unification Type' String (UnifyT m) where
---  substitute _ _ = pure unit
---  lookupTermVariableAssumption v = do
---     UnificationState st <- get
---     case Map.lookup v st.typingAssumptions of
---       Just t -> pure t
---       Nothing -> throwError $ NotInScope v
---  unificationError t1 t2 = throwError $ UnificationError t1 t2
-
------------------------------
-
-
-
---instance
---  ( Monad m
---  , Assumption Judgement Value Type' 
---  , Unification Type' String (UnifyT m)
---  ) => AppRule Value Mu (JudgementF String Type') (UnifyT m) where
---  appRule j1 j2 = do
---     let (Typing e1 t1) = assume j1
---         (Typing e2 t2) = assume j2
---     case t1 of
---       (In (App (In (App (In (Cat Arrow)) a)) b)) -> do
---          unify a t2
---          pure $ JudgeApp e1 e2 b
---       _ -> throwError $ InvalidApp t1 e2 
-
-
-
-
----- Language.Lambda.Unify
-
---class Unification typ var m | typ -> var where
---  substitute :: var -> typ -> m Unit
---  lookupTermVariableAssumption :: var -> m typ
-----  applyCurrentSubstitution :: typ -> m typ
---  unificationError :: forall a . typ -> typ -> m a
 
 instance
   ( Monad m
