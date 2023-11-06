@@ -4,7 +4,6 @@ import Prelude
 
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF(..))
-import Language.Lambda.Infer.Tree (class Reckon, reckon)
 import Language.Void.Value (VoidF(..))
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
@@ -24,7 +23,6 @@ infer :: forall exp var cat m typ jujF juj.
       => AppRule jujF juj m
       => VarRule var typ (jujF juj)
       => CatRule cat (m juj)
-      => Reckon juj m
       => exp -> m juj
 infer = cata judge
 
@@ -38,10 +36,9 @@ judge :: forall var cat m typ jujF juj.
       => AppRule jujF juj m
       => VarRule var typ (jujF juj)
       => CatRule cat (m juj)
-      => Reckon juj m
       => Algebra (LambdaF var cat) (m juj) 
-judge lam = reckon 
-  case lam of
+judge =
+  case _ of
     Abs binding inferBody -> do
        tyBind <- fresh
        makeAssumption binding tyBind

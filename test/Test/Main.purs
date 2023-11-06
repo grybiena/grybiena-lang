@@ -2,20 +2,14 @@ module Test.Main where
 
 import Prelude
 
-import Control.Comonad.Cofree ((:<))
 import Data.Either (Either(..))
-import Data.List (List(..), singleton, (:))
-import Data.Maybe (maybe)
-import Data.Tree (Tree, drawTree, drawTreeLines)
-import Data.Tree.Zipper (fromTree, insertAfter, insertChild, toTree)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
-import Language.Lambda.Calculus (abs, app)
 import Language.Lambda.Infer (judgement)
 import Language.Void.Type (Judgement, JudgementF(..), Type', runInfer, runInfer')
-import Language.Void.Value (ValVar(..), Value, parseValue)
+import Language.Void.Value (Value, parseValue)
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParseError, runParserT)
 import Parsing.Indent (runIndent)
@@ -50,37 +44,8 @@ unfurl v = test v do
       Assert.equal (Right suc) (valueParser $ prettyPrint suc)
       case runInfer' suc of
         Left err /\ _-> Assert.assert ("type error: " <> show err) false
-        Right t /\ j -> do 
-          liftEffect $ log $ drawTree $ tTree t
-          liftEffect $ log $ drawTreeLines $ (maybe (singleton ".") showUnfurl) <$> j
- 
-tTree :: Judgement -> Tree String
-tTree j =
-  case project j of
-      HasType (ValVar v) t -> (v <> " :: " <> prettyPrint t) :< Nil
-      JudgeApp x y t ->
-        let (exx :: Value) /\ (_ :: Type') = judgement $ project x
-            (exy :: Value) /\ (_ :: Type') = judgement $ project y
-            sx =  prettyPrint (app exx exy) <> " :: " <> prettyPrint t
-         in toTree $ insertAfter (tTree y) $ insertChild (tTree x) (fromTree (sx :< Nil))
-      JudgeAbs v a t ->
-        let (ex :: Value) /\ (_ :: Type') = judgement $ project a
-            sx =  prettyPrint (abs v ex) <> " :: " <> prettyPrint t
-         in toTree $ insertChild (tTree a) (fromTree (sx :< Nil)) 
-
-
-
-
- 
-showUnfurl :: Judgement -> List String
-showUnfurl j = 
-  let (ex :: Value) /\ (t :: Type') = judgement $ project j
-      h = prettyPrint ex <> " :: " <> prettyPrint t
-  in case project j of
-       HasType _ _ -> singleton h
-       JudgeApp x y _ -> h:(showUnfurl x <> showUnfurl y)
-       JudgeAbs _ a _ -> h:(showUnfurl a)
-
+        Right t /\ _ -> do 
+          liftEffect $ logUnfurl t
 
 logUnfurl :: Judgement -> Effect Unit
 logUnfurl j = do
@@ -93,7 +58,6 @@ logUnfurl j = do
       logUnfurl y
     JudgeAbs _ a _ -> do
       logUnfurl a
-
 
 testInferType :: String -> String -> TestSuite
 testInferType v t = test (v <> " :: " <> t) do
