@@ -2,25 +2,28 @@ module Language.Void.Type where
 
 import Prelude
 
+import Control.Comonad.Cofree ((:<))
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Except.Trans (class MonadThrow)
-import Control.Monad.State (class MonadState, StateT, evalState, get, gets, modify_)
-import Control.Monad.Writer (class MonadTell, WriterT, runWriterT)
+import Control.Monad.State (class MonadState, StateT, get, gets, modify_, runState)
 import Data.Either (Either)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity)
-import Data.List (List)
+import Data.List (List(..))
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), maybe)
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
+import Data.Tree (Tree)
+import Data.Tree.Zipper (Loc, fromTree, insertAfter, insertChild, modifyValue, toTree, up)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, app, prettyVar, var)
 import Language.Lambda.Infer (class AbsRule, class CatRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, fresh, infer, judgement, substitute, unify)
+import Language.Lambda.Infer.Tree (class Reckon)
 import Language.Void.Value (ValVar, Value, VoidF(..))
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (text, (<+>))
@@ -62,6 +65,7 @@ newtype UnificationState =
     nextVar :: Int
   , typingAssumptions :: Map ValVar Type'
   , currentSubstitution :: Map TyVar Type'
+  , reckoning :: Loc (Maybe Judgement)
   }
 
 data UnificationError =
@@ -74,13 +78,12 @@ derive instance Generic UnificationError _
 instance Show UnificationError where
   show = genericShow
 
-newtype UnifyT m a = UnifyT (ExceptT UnificationError (WriterT (List Judgement) (StateT UnificationState m)) a)
+newtype UnifyT m a = UnifyT (ExceptT UnificationError (StateT UnificationState m) a)
 derive newtype instance Functor m => Functor (UnifyT m)
 derive newtype instance Monad m => Apply (UnifyT m)
 derive newtype instance Monad m => Applicative (UnifyT m)
 derive newtype instance Monad m => Bind (UnifyT m)
 derive newtype instance Monad m => Monad (UnifyT m)
-derive newtype instance Monad m => MonadTell (List Judgement) (UnifyT m)
 derive newtype instance Monad m => MonadState UnificationState (UnifyT m)
 derive newtype instance Monad m => MonadThrow UnificationError (UnifyT m)
 
@@ -136,7 +139,7 @@ instance Traversable (JudgementF exp typ) where
   traverse f (JudgeAbs a b t) = (\tb -> JudgeAbs a tb t) <$> f b
   sequence = traverse identity
 
-runInfer' :: Value -> Either UnificationError Judgement /\ List Judgement
+runInfer' :: Value -> Either UnificationError Judgement /\ Tree (Maybe Judgement)
 runInfer' v = runUnifyT (infer v)
 
 runInfer :: Value -> Either UnificationError Type'
@@ -145,8 +148,16 @@ runInfer v = foo <$> (fst $ runUnifyT (infer v))
     foo :: Judgement -> Type'
     foo j = let (_ :: Value) /\ t = judgement j in t
 
-runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a /\ List Judgement
-runUnifyT (UnifyT f) =  evalState (runWriterT (runExceptT f)) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty })
+runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a /\ Tree (Maybe Judgement)
+runUnifyT (UnifyT f) = (\(UnificationState st) -> toTree st.reckoning) <$> runState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty, reckoning: fromTree (Nothing :< Nil) })
+
+
+instance Monad m => Reckon Judgement (UnifyT m) where
+  reckon infer = do
+    modify_ (\(UnificationState st) -> UnificationState st { reckoning = insertChild (Nothing :< Nil) $ insertAfter (Nothing :< Nil) st.reckoning })
+    j <- infer
+    modify_ (\(UnificationState st) -> UnificationState st { reckoning = maybe st.reckoning (modifyValue (const $ Just j)) (up st.reckoning) })
+    pure j
 
 instance Monad m => Supply Type' (UnifyT m) where
   fresh = var <$> fresh

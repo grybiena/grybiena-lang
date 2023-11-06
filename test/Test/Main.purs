@@ -4,7 +4,10 @@ import Prelude
 
 import Data.Either (Either(..))
 import Data.Functor.Mu (Mu(..))
+import Data.List (List(..), singleton, (:))
+import Data.Maybe (maybe)
 import Data.Traversable (traverse_)
+import Data.Tree (drawTree, drawTreeLines)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Class (liftEffect)
@@ -46,8 +49,19 @@ unfurl v = test v do
       case runInfer' suc of
         Left err /\ _-> Assert.assert ("type error: " <> show err) false
         Right _ /\ j -> 
-          liftEffect $ traverse_ (\x -> logUnfurl x *> log "------") j
+          liftEffect $ log $ drawTreeLines $ (maybe (singleton ".") showUnfurl) <$> j
  
+ 
+showUnfurl :: Judgement -> List String
+showUnfurl j = 
+  let (ex :: Value) /\ (t :: Type') = judgement j
+      h = prettyPrint ex <> " :: " <> prettyPrint t
+  in case project j of
+       HasType _ _ -> singleton h
+       JudgeApp x y _ -> h:(showUnfurl x <> showUnfurl y)
+       JudgeAbs _ a _ -> h:(showUnfurl a)
+
+
 logUnfurl :: Judgement -> Effect Unit
 logUnfurl j = do
   let (ex :: Value) /\ (t :: Type') = judgement j

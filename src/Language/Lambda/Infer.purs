@@ -7,6 +7,7 @@ import Data.List (List, singleton)
 import Data.Traversable (class Traversable)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF(..))
+import Language.Lambda.Infer.Tree (class Reckon, Reckoner, reckon)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Coalgebra (CoalgebraM)
@@ -40,11 +41,9 @@ infer :: forall f jujF m exp var cat typ.
        => TypingContext var typ m
        => AbsRule var exp typ f jujF
        => VarRule var exp typ jujF
-       => MonadTell (List (f jujF)) m
+       => Reckon (f jujF) m
        => exp -> m (f jujF)
-infer exp = anaM judge exp >>= trace
-  where
-    trace i = tell (singleton i) *> pure i
+infer exp = reckon (anaM judge exp)
 
 judge :: forall f jujF m exp var cat typ.
          Corecursive (f jujF) jujF
@@ -58,7 +57,7 @@ judge :: forall f jujF m exp var cat typ.
       => TypingContext var typ m
       => AbsRule var exp typ f jujF
       => VarRule var exp typ jujF
-      => MonadTell (List (f jujF)) m
+      => Reckon (f jujF) m
       => CoalgebraM m jujF exp
 judge e =
   case project e of
