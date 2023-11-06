@@ -2,77 +2,91 @@ module Language.Lambda.Infer where
 
 import Prelude
 
-import Control.Monad.Writer (class MonadTell, tell)
-import Data.List (List, singleton)
-import Data.Traversable (class Traversable)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF(..))
-import Language.Lambda.Infer.Tree (class Reckon, Reckoner, reckon)
-import Matryoshka.Class.Corecursive (class Corecursive)
+import Language.Lambda.Infer.Tree (class Reckon, reckon)
+import Language.Void.Value (VoidF(..))
+import Matryoshka.Algebra (Algebra)
+import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
-import Matryoshka.Coalgebra (CoalgebraM)
-import Matryoshka.Unfold (anaM)
+import Matryoshka.Fold (cata)
 
-class AbsRule :: Type -> Type -> Type -> ((Type -> Type) -> Type) -> (Type -> Type) -> Constraint
-class AbsRule var exp typ f jujF | var -> typ where
-  absRule :: var -> typ -> f jujF -> jujF exp
 
-class AppRule :: forall k1 k2. k1 -> ((k1 -> k2) -> Type) -> (k1 -> k2) -> (k2 -> Type) -> Constraint
-class AppRule exp f jujF m | exp -> f jujF where
-  appRule :: f jujF -> f jujF -> m (jujF exp)
- 
-class VarRule :: Type -> Type -> Type -> (Type -> Type) -> Constraint
-class VarRule var exp typ jujF | var -> typ where
-  varRule :: var -> typ -> jujF exp
 
-class CatRule :: forall k1 k2. (k1 -> Type) -> k1 -> (k1 -> k2) -> (k2 -> Type) -> Constraint
-class CatRule cat exp jujF m where
-  catRule :: cat exp -> m (jujF exp)
-
-infer :: forall f jujF m exp var cat typ.
-          Corecursive (f jujF) jujF
-       => Monad m
-       => Traversable jujF
-       => Recursive exp (LambdaF var cat)
-       => AppRule exp f jujF m
-       => CatRule cat exp jujF m
-       => Supply typ m
-       => Rewrite typ m
-       => TypingContext var typ m
-       => AbsRule var exp typ f jujF
-       => VarRule var exp typ jujF
-       => Reckon (f jujF) m
-       => exp -> m (f jujF)
-infer exp = reckon (anaM judge exp)
-
-judge :: forall f jujF m exp var cat typ.
-         Corecursive (f jujF) jujF
+infer :: forall exp var cat m typ jujF juj.
+         Recursive exp (LambdaF var cat)
+      => Corecursive juj jujF
       => Monad m
-      => Traversable jujF
-      => Recursive exp (LambdaF var cat)
-      => AppRule exp f jujF m
-      => CatRule cat exp jujF m
       => Supply typ m
-      => Rewrite typ m
       => TypingContext var typ m
-      => AbsRule var exp typ f jujF
-      => VarRule var exp typ jujF
-      => Reckon (f jujF) m
-      => CoalgebraM m jujF exp
-judge e =
-  case project e of
-    Abs b a -> do
-       t <- fresh
-       makeAssumption b t
-       ja <- infer a
-       t' <- applyCurrentSubstitution t
-       pure $ absRule b t' ja 
-    App f a -> join $ appRule <$> infer f <*> infer a
-    Var v -> varRule v <$> (askEnvironment v >>= applyCurrentSubstitution)
+      => Rewrite typ m
+      => AbsRule var typ jujF juj
+      => AppRule jujF juj m
+      => VarRule var typ (jujF juj)
+      => CatRule cat (m juj)
+      => Reckon juj m
+      => exp -> m juj
+infer = cata judge
+
+judge :: forall var cat m typ jujF juj.
+         Monad m
+      => Corecursive juj jujF
+      => Supply typ m
+      => TypingContext var typ m
+      => Rewrite typ m
+      => AbsRule var typ jujF juj
+      => AppRule jujF juj m
+      => VarRule var typ (jujF juj)
+      => CatRule cat (m juj)
+      => Reckon juj m
+      => Algebra (LambdaF var cat) (m juj) 
+judge lam = reckon
+  case lam of
+    Abs binding inferBody -> do
+       tyBind <- fresh
+       makeAssumption binding tyBind
+       tyBody <- inferBody
+       tyBind' <- applyCurrentSubstitution tyBind
+       pure $ embed $ absRule binding tyBind' tyBody
+    App f a -> embed <$> (join $ appRule <$> f <*> a)
+    Var v -> embed <<< varRule v <$> (askEnvironment v >>= applyCurrentSubstitution)
     Cat c -> catRule c
 
+class AbsRule var typ jujF juj where
+  absRule :: var -> typ -> juj -> jujF juj
 
-----
+class Corecursive juj jujF <= AppRule jujF juj m where
+  appRule :: juj -> juj -> m (jujF juj)
+
+class VarRule var typ juj where
+  varRule :: var -> typ -> juj
+
+class CatRule cat inf where
+  catRule :: cat inf -> inf
+
+
+instance CatRule VoidF a where 
+  catRule (VoidF v) = absurd v
+
+ 
+instance
+  ( Monad m
+  , Corecursive juj jujF
+  , Recursive juj jujF
+  , TypingJudgement exp typ jujF juj
+  , TypingApplication typ jujF juj
+  , Rewrite typ m
+  , Unify typ m
+  ) => AppRule jujF juj m where
+  appRule f a = do
+    let _ /\ arrTy = judgement $ project f
+    arrArg /\ arrRet <- unifyWithArrow arrTy
+    let _ /\ argTy = judgement $ project a
+    void $ unify argTy arrArg 
+    appTy <- applyCurrentSubstitution arrRet
+    pure $ typingApplication f a appTy
+
+--------------
 
 class Supply :: Type -> (Type -> Type) -> Constraint
 class Supply typ m where
@@ -86,31 +100,16 @@ class Unify typ m where
   unify :: typ -> typ -> m typ
   unifyWithArrow :: typ -> m (typ /\ typ)
 
-class TypingJudgement exp typ f jujF | exp -> typ where 
-  judgement :: f jujF -> exp /\ typ
+class Corecursive juj jujF <= TypingJudgement exp typ jujF juj | juj -> exp, juj -> typ where 
+  judgement :: jujF juj -> exp /\ typ
 
-class TypingApplication exp typ jujF | exp -> typ where
-  typingApplication :: exp -> exp -> typ -> jujF exp
+class Corecursive juj jujF <= TypingApplication typ jujF juj where
+  typingApplication :: juj -> juj -> typ -> jujF juj
 
 class Substitution var typ m where
   substitute :: var -> typ -> m Unit
 
 class Rewrite typ m where
   applyCurrentSubstitution :: typ -> m typ
-
-instance
-  ( Monad m
-  , TypingJudgement exp typ f jujF
-  , TypingApplication exp typ jujF
-  , Rewrite typ m
-  , Unify typ m
-  ) => AppRule exp f jujF m where
-  appRule f a = do
-    let arrExp /\ arrTy = judgement f
-    arrArg /\ arrRet <- unifyWithArrow arrTy
-    let argExp /\ argTy = judgement a
-    void $ unify argTy arrArg 
-    appTy <- applyCurrentSubstitution arrRet
-    pure $ typingApplication arrExp argExp appTy
 
 
