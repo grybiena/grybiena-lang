@@ -22,9 +22,9 @@ import Data.Tree.Zipper (Loc, fromTree, insertAfter, insertChild, modifyValue, t
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, app, prettyVar, var)
-import Language.Lambda.Infer (class AbsRule, class CatRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, fresh, infer, judgement, substitute, unify)
 import Language.Lambda.Infer.Tree (class Reckon)
-import Language.Void.Value (ValVar, Value, VoidF(..))
+import Language.Lambda.Inference (class AbsRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, fresh, infer, judgement, substitute, unify)
+import Language.Void.Value (ValVar, Value)
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (pretty)
@@ -95,25 +95,25 @@ data JudgementF var typ a =
 
 type Judgement = Mu (JudgementF ValVar Type')
 
-instance VarRule var exp typ (JudgementF var typ) where
+instance VarRule var typ (JudgementF var typ (Mu (JudgementF var typ))) where
   varRule = HasType
 
-instance AbsRule ValVar Value Type' Mu (JudgementF ValVar Type') where
+instance AbsRule ValVar Type' (JudgementF ValVar Type') Judgement where
   absRule b t j =
-    let e /\ ret = judgement j
-      in JudgeAbs b e (In (App (In (App (In (Cat Arrow)) t)) ret)) 
+    let _ /\ ret = judgement $ project j
+      in JudgeAbs b j (In (App (In (App (In (Cat Arrow)) t)) ret)) 
 
-instance TypingApplication Value Type' (JudgementF ValVar Type') where
+instance TypingApplication Type' (JudgementF ValVar Type') Judgement where
   typingApplication a b t = JudgeApp a b t
 
-instance TypingJudgement Value Type' Mu (JudgementF ValVar Type') where
-  judgement (In (HasType e t)) = (In (Var e)) /\ t
-  judgement (In (JudgeApp a b t)) = 
-    let e1 /\ _ = judgement a
-        e2 /\ _ = judgement b
+instance TypingJudgement Value Type' (JudgementF ValVar Type') Judgement where
+  judgement (HasType e t) = (In (Var e)) /\ t
+  judgement (JudgeApp a b t) = 
+    let e1 /\ _ = judgement $ project a
+        e2 /\ _ = judgement $ project b
      in (In (App e1 e2)) /\ t
-  judgement (In (JudgeAbs a b t)) =
-    let e2 /\ _ = judgement b
+  judgement (JudgeAbs a b t) =
+    let e2 /\ _ = judgement $ project b
      in (In (Abs a e2)) /\ t
 
 
@@ -146,7 +146,7 @@ runInfer :: Value -> Either UnificationError Type'
 runInfer v = foo <$> (fst $ runUnifyT (infer v))
   where
     foo :: Judgement -> Type'
-    foo j = let (_ :: Value) /\ t = judgement j in t
+    foo j = let _ /\ t = judgement (project j) in t
 
 runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a /\ Tree (Maybe Judgement)
 runUnifyT (UnifyT f) = (\(UnificationState st) -> toTree st.reckoning) <$> runState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty, reckoning: fromTree (Nothing :< Nil) })
@@ -210,8 +210,6 @@ instance Monad m => TypingContext ValVar Type' (UnifyT m) where
 --          pure $ JudgeApp e1 e2 b
 --       _ -> throwError $ InvalidApp t1 e2 
 
-instance Monad m => CatRule VoidF Value (JudgementF ValVar Type') m where 
-  catRule (VoidF v) = absurd v
 
 
 

@@ -13,7 +13,7 @@ import Effect (Effect)
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Language.Lambda.Calculus (LambdaF(..))
-import Language.Lambda.Infer (judgement)
+import Language.Lambda.Inference (judgement)
 import Language.Void.Type (Judgement, JudgementF(..), Type', runInfer, runInfer')
 import Language.Void.Value (Value, parseValue)
 import Matryoshka.Class.Recursive (project)
@@ -28,7 +28,7 @@ import Test.Unit.Main (runTest)
 main :: Effect Unit
 main = runTest do
   suite "Language.Void" do
-    unfurl "\\a b -> a b" 
+    unfurl "\\a b c -> a b c" 
 
 tests :: Effect Unit
 tests = runTest do
@@ -54,7 +54,7 @@ unfurl v = test v do
  
 showUnfurl :: Judgement -> List String
 showUnfurl j = 
-  let (ex :: Value) /\ (t :: Type') = judgement j
+  let (ex :: Value) /\ (t :: Type') = judgement $ project j
       h = prettyPrint ex <> " :: " <> prettyPrint t
   in case project j of
        HasType _ _ -> singleton h
@@ -64,7 +64,7 @@ showUnfurl j =
 
 logUnfurl :: Judgement -> Effect Unit
 logUnfurl j = do
-  let (ex :: Value) /\ (t :: Type') = judgement j
+  let (ex :: Value) /\ (t :: Type') = judgement $ project j
   log (prettyPrint ex <> " :: " <> prettyPrint t)
   case project j of
     HasType _ _ -> pure unit
