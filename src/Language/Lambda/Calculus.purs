@@ -86,7 +86,7 @@ absMany :: forall t lam var cat .
         => Foldable t
         => t var -> lam -> lam
 absMany ps = flip (foldr ($)) (abs <$> ps) 
-
+ 
 abs :: forall lam var cat .
        Corecursive lam (LambdaF var cat)
     => var -> lam -> lam

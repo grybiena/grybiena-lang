@@ -28,9 +28,7 @@ main = runTest do
     testInferType "\\x y -> x y" "(a -> b) -> a -> b"
     testInferType "\\x y -> y x" "a -> (a -> b) -> b"
     testInferType "\\x y z -> (x z) (y z)" "(a -> b -> c) -> (a -> b) -> a -> c"
--- TODO expect this to pass - it seems we are applying z to (y z) when we should apply x to z the to (y z) 
--- this is a parser error
---    testInferType "\\x y z -> x z (y z)" "(a -> b -> c) -> (a -> b) -> a -> c"
+    testInferType "\\x y z -> x z (y z)" "(a -> b -> c) -> (a -> b) -> a -> c"
 
 
 testInferType :: String -> String -> TestSuite
@@ -43,7 +41,7 @@ testInferType v t = test (v <> " :: " <> t) do
         Right suc ->
           case inferUpToAlpha suc typ of
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
-            Left err -> Assert.assert ("unification error: " <> show err) false
+            Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> show err) false
 
  
 

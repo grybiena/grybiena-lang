@@ -9,6 +9,7 @@ import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, ab
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
 import Parsing (ParserT)
 import Parsing.Combinators (many1Till)
+import Parsing.Expr (buildExprParser)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (pretty)
 
@@ -41,7 +42,7 @@ instance PrettyLambda ValVar VoidF where
 
 
 parseValue :: forall m . Monad m => ParserT String m Value
-parseValue = buildPostfixParser [parseApp] parseValueAtom 
+parseValue = buildExprParser [] (buildPostfixParser [parseApp] parseValueAtom) 
 
 parseValueAtom :: forall m . Monad m => ParserT String m Value
 parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< ValVar) <$> identifier) <|> (parens parseValue)
@@ -52,5 +53,5 @@ parseAbs = absMany <$> parsePats <*> parseValue
     parsePats = reservedOp "\\" *> many1Till (ValVar <$> identifier) (reservedOp "->")
 
 parseApp :: forall m . Monad m => Value -> ParserT String m Value
-parseApp v = app v <$> parseValue
+parseApp v = app v <$> parseValueAtom
 

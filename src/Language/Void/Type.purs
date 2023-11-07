@@ -251,7 +251,7 @@ occursCheck :: forall m. Monad m => TyVar -> Type' -> UnifyT m Unit
 occursCheck u t = do
   case project t of
     Var v -> do
-      when (u == v) $ throwError $ Err "Occurs check"
+      when (u == v) $ throwError $ Err $ "Occurs check"
     App a b -> do
       occursCheck u a
       occursCheck u b
