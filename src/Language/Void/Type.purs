@@ -22,7 +22,7 @@ import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
-import Language.Lambda.Infer (class AbsRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, fresh, infer, judgement, substitute, unify)
+import Language.Lambda.Infer (class AbsRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, expression, fresh, infer, substitute, typing, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
 import Language.Void.Value (ValVar, Value)
 import Matryoshka.Class.Recursive (project)
@@ -125,21 +125,19 @@ instance VarRule var typ (JudgementF var typ (Mu (JudgementF var typ))) where
 
 instance AbsRule ValVar Type' (JudgementF ValVar Type') Judgement where
   absRule b t j =
-    let _ /\ ret = judgement $ project j
+    let ret = typing $ project j
       in JudgeAbs b j (In (App (In (App (In (Cat Arrow)) t)) ret)) 
 
 instance TypingApplication Type' (JudgementF ValVar Type') Judgement where
   typingApplication a b t = JudgeApp a b t
 
 instance TypingJudgement Value Type' (JudgementF ValVar Type') Judgement where
-  judgement (HasType e t) = (In (Var e)) /\ t
-  judgement (JudgeApp a b t) = 
-    let e1 /\ _ = judgement $ project a
-        e2 /\ _ = judgement $ project b
-     in (In (App e1 e2)) /\ t
-  judgement (JudgeAbs a b t) =
-    let e2 /\ _ = judgement $ project b
-     in (In (Abs a e2)) /\ t
+  typing (HasType _ t) = t
+  typing (JudgeApp _ _ t) = t
+  typing (JudgeAbs _ _ t) = t
+  expression (HasType e _) = var e
+  expression (JudgeApp a b _) = app (expression $ project a) (expression $ project b)
+  expression (JudgeAbs a b _) = abs a (expression $ project b)
 
 
 instance Functor (JudgementF exp typ) where
@@ -171,7 +169,7 @@ runInfer :: Value -> Either UnificationError Type'
 runInfer v = foo <$> (fst $ runUnifyT (infer v))
   where
     foo :: Judgement -> Type'
-    foo j = let _ /\ t = judgement (project j) in t
+    foo j = let t = typing (project j) in t
 
 runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a /\ UnificationState
 runUnifyT (UnifyT f) = runState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty })

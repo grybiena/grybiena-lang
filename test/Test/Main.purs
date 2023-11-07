@@ -21,7 +21,6 @@ main :: Effect Unit
 main = runTest do
   suite "Language.Void" do
 
-
     testExpectErr "x" (NotInScope $ ValVar "x")
 
     testExpectErr "\\x -> x x" $
@@ -61,11 +60,7 @@ testExpectErr v e = test (v <> " :: _|_") do
         Left e' -> Assert.equal e e'
         Right _ -> Assert.assert "Expected failure but got success" false
 
-
-
-
-
-data Outcome =
+data Fixture =
     ExpectError { term :: String, err :: UnificationError }
   | ExpectInfer { term :: String, typ :: String }
  

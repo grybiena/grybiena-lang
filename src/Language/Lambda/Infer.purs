@@ -58,9 +58,8 @@ class Corecursive juj jujF <= AppRule jujF juj m where
 class VarRule var typ juj where
   varRule :: var -> typ -> juj
 
-class CatRule cat inf where
-  catRule :: cat inf -> inf
-
+class CatRule cat juj where
+  catRule :: cat juj -> juj
 
 instance CatRule VoidF a where 
   catRule (VoidF v) = absurd v
@@ -76,9 +75,9 @@ instance
   , Unify typ m
   ) => AppRule jujF juj m where
   appRule f a = do
-    let _ /\ arrTy = judgement $ project f
+    let arrTy = typing $ project f
     arrArg /\ arrRet <- unifyWithArrow arrTy
-    let _ /\ argTy = judgement $ project a
+    let argTy = typing $ project a
     void $ unify arrArg argTy
     pure $ typingApplication f a arrRet
 
@@ -97,7 +96,11 @@ class Unify typ m where
   unifyWithArrow :: typ -> m (typ /\ typ)
 
 class Corecursive juj jujF <= TypingJudgement exp typ jujF juj | jujF -> exp, jujF -> typ where 
-  judgement :: jujF juj -> exp /\ typ
+  typing :: jujF juj -> typ
+  expression :: jujF juj -> exp
+
+judgement :: forall exp typ jujF juj. TypingJudgement exp typ jujF juj => jujF juj -> exp /\ typ
+judgement j = expression j /\ typing j
 
 class Corecursive juj jujF <= TypingApplication typ jujF juj where
   typingApplication :: juj -> juj -> typ -> jujF juj
