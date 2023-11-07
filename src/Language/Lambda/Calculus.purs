@@ -6,9 +6,15 @@ import Data.Eq (class Eq1, eq1)
 import Data.Foldable (class Foldable, foldMap, foldl, foldr)
 import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
+import Data.Maybe (Maybe, isJust, maybe)
+import Data.Set (Set)
+import Data.Set as Set
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
+import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
+import Matryoshka.Class.Recursive (class Recursive)
+import Matryoshka.Fold (cata)
 import Prettier.Printer (DOC, text)
 
 -- | Un-Fixed LambdaF 
@@ -66,6 +72,58 @@ instance Traversable cat => Traversable (LambdaF var cat) where
   traverse _ (Var v) = pure (Var v)
   traverse f (Cat c) = Cat <$> traverse f c
   sequence = traverse identity
+
+
+occursIn :: forall var cat f .
+            Ord var
+         => Foldable cat
+         => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+         => var -> f (LambdaF var cat) -> Boolean
+occursIn v expr = v `Set.member` universe expr
+
+
+universe :: forall var cat f .
+            Ord var
+         => Foldable cat
+         => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+         => f (LambdaF var cat) -> (Set var)
+universe = cata vars
+
+vars :: forall var cat .
+        Ord var
+     => Foldable cat
+     => Algebra (LambdaF var cat) (Set var)
+vars (Abs v a) = Set.insert v a
+vars (Var v) = Set.singleton v
+vars (App a b) = a `Set.union` b 
+vars (Cat c) = foldr Set.union Set.empty c
+
+rewrite :: forall var cat f .
+           Eq var
+        => Foldable cat
+        => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+        => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+        => (var -> Maybe (f (LambdaF var cat)))
+        -> f (LambdaF var cat)
+        -> f (LambdaF var cat)
+rewrite = cata <<< onVar
+
+
+onVar :: forall var cat f .
+        Eq var
+     => Foldable cat
+     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+     => (var -> Maybe (f (LambdaF var cat)))
+     -> Algebra (LambdaF var cat) (f (LambdaF var cat))
+onVar replacement =
+  case _ of
+    Abs v a | isJust (replacement v) -> a
+    Abs v a -> abs v a
+    Var v -> maybe (var v) identity (replacement v)
+    App a b -> app a b
+    Cat c -> cat c
+
+
 
 
 class PrettyVar i where

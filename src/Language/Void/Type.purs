@@ -17,11 +17,12 @@ import Data.Identity (Identity)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), maybe)
+import Data.Set as Set
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, occursIn, prettyVar, rewrite, universe, var)
 import Language.Lambda.Infer (class AbsRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, expression, fresh, infer, substitute, typing, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
 import Language.Void.Value (ValVar, Value)
@@ -45,6 +46,10 @@ instance Eq (TT a) where
 instance Eq1 TT where
   eq1  _ _ = true
 
+instance Foldable TT where
+  foldr _ b _ = b
+  foldl _ b _ = b
+  foldMap _ _ = mempty
 
 
 type Type' = Lambda TyVar TT
@@ -222,40 +227,16 @@ instance
   substitute v t' = do
 
      t <- applyCurrentSubstitution t'
-     when (occursCheck v t) $ throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
+     when (v `occursIn` t) $ throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
      u <- applyCurrentSubstitution (var v)
      case project u of
         Var v' | v' == v -> pure unit 
         _ -> do
           void $ unify u t
-     -- TODO what if there is an existing substitution?
-     -- we should unify
-     -- TODO apply substitution to all existing substitutions
+     -- apply new substitution to all existing substitutions
      modify_ (\(UnificationState st) -> UnificationState st {
-                currentSubstitution = Map.insert v t (rewrite (\x -> if x == v then t else var x) <$> st.currentSubstitution)
+                currentSubstitution = Map.insert v t (rewrite (\x -> if x == v then Just t else Nothing) <$> st.currentSubstitution)
               })
-
-rewrite :: (TyVar -> Type') -> Type' -> Type'
-rewrite f t =
-  case project t of
-    Var v -> f v
-    App a b -> app (rewrite f a) (rewrite f b)
-    Abs v a -> abs v (rewrite f a)
-      -- TODO what if v gets substituted????
-    Cat _ -> t
-
-
-
-
-occursCheck :: TyVar -> Type' -> Boolean
-occursCheck u t = do
-  case project t of
-    Var v -> u == v
-    App a b -> occursCheck u a || occursCheck u b
-    Abs v a -> u == v || occursCheck u a
-    Cat _ -> false
-
-
 
 instance
   ( Monad m
