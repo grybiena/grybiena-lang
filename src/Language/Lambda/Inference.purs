@@ -3,15 +3,44 @@ module Language.Lambda.Inference where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, (:<))
-import Data.Tuple (Tuple(..))
+import Control.Monad.Except (ExceptT)
+import Control.Monad.State (State)
+import Data.Either (Either)
+import Data.Foldable (class Foldable)
+import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (LambdaF(..), app, cat)
-import Language.Lambda.Unification (class Context, class Fresh, class Rewrite, class Unification, assume, fresh, require, rewrite, unify)
+import Language.Lambda.Unification (class Context, class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Rewrite, class Unification, class UnificationError, TypingContext, assume, fresh, require, rewrite, runUnification, unify)
 import Language.Void.Value (VoidF(..))
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive)
 import Matryoshka.Fold (cata)
+
+
+runInference :: forall exp var cat err t var' cat' .
+        Recursive exp (LambdaF var cat)
+     => Fresh (t (LambdaF var' cat')) (ExceptT err (State (TypingContext var t var' cat')))
+     => Context var (t (LambdaF var' cat')) (ExceptT err (State (TypingContext var t var' cat')))
+     => Rewrite (t (LambdaF var' cat')) (ExceptT err (State (TypingContext var t var' cat')))
+     => Unification (t (LambdaF var' cat')) (ExceptT err (State (TypingContext var t var' cat')))
+     => Arrow (t (LambdaF var' cat'))
+     => Inference var cat (t (LambdaF var' cat')) (ExceptT err (State (TypingContext var t var' cat')))
+     => Enumerable var'
+     => Ord var
+     => Ord var'
+     => Foldable cat'
+     => NotInScopeError var err
+     => InfiniteTypeError var' (t (LambdaF var' cat')) err 
+     => UnificationError (t (LambdaF var' cat')) err
+     => Fresh var' (ExceptT err (State (TypingContext var t var' cat'))) 
+     => Unification (cat' (t (LambdaF var' cat'))) (ExceptT err (State (TypingContext var t var' cat'))) 
+     => Inference var cat (t (LambdaF var' cat')) (ExceptT err (State (TypingContext var t var' cat'))) 
+     => Corecursive (t (LambdaF var' cat')) (LambdaF var' cat')
+     => Recursive (t (LambdaF var' cat')) (LambdaF var' cat')
+     => exp -> Either err (t (LambdaF var' cat')) 
+runInference v = head <$> (fst $ runUnification (infer v))
+
 
 infer :: forall exp var cat m typ .
         Monad m

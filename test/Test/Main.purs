@@ -6,8 +6,9 @@ import Data.Either (Either(..))
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
+import Language.Lambda.Inference (runInference)
 import Language.Lambda.Unification (rewrite, runUnification, unify)
-import Language.Void.Type (Type', UnificationError(..), parseType, runInfer)
+import Language.Void.Type (Type', UnificationError(..), parseType)
 import Language.Void.Value (ValVar(..), Value, parseValue)
 import Parsing (ParseError, runParserT)
 import Parsing.Indent (runIndent)
@@ -43,8 +44,8 @@ testInferType v t = test (v <> " :: " <> t) do
   case Tuple <$> valueParser v <*> typeParser t of
     Left err -> Assert.assert ("parse error: " <> show err) false
     Right (val /\ typ) -> do
-      case runInfer val of
-        Left err -> Assert.assert ("infer error: " <> show err) false
+      case runInference val of
+        Left (err :: UnificationError) -> Assert.assert ("infer error: " <> show err) false
         Right suc ->
           case alphaEquivalent suc typ of
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
@@ -55,10 +56,10 @@ testExpectErr :: String -> UnificationError -> TestSuite
 testExpectErr v e = test (v <> " :: _|_") do
   case valueParser v of
     Left err -> Assert.assert ("parse error: " <> show err) false
-    Right val -> do
-      case runInfer val of
+    Right (val :: Value) -> do
+      case runInference val of
         Left e' -> Assert.equal e e'
-        Right _ -> Assert.assert "Expected failure but got success" false
+        Right (_ :: Type') -> Assert.assert "Expected failure but got success" false
 
 data Fixture =
     ExpectError { term :: String, err :: UnificationError }

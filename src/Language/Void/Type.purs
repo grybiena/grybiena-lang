@@ -3,22 +3,18 @@ module Language.Void.Type where
 import Prelude
 
 import Control.Alt ((<|>))
-import Control.Comonad.Cofree (Cofree, head)
 import Control.Lazy (defer)
-import Data.Either (Either)
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.Map (Map)
 import Data.Show.Generic (genericShow)
-import Data.Tuple (fst)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, prettyVar, var)
-import Language.Lambda.Inference (class ArrowObject, infer)
-import Language.Lambda.Unification (class Enumerable, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, runUnification)
+import Language.Lambda.Inference (class ArrowObject)
+import Language.Lambda.Unification (class Enumerable, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError)
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
-import Language.Void.Value (ValVar, Value, VoidF)
+import Language.Void.Value (ValVar, Value)
 import Parsing (ParserT)
 import Parsing.Combinators (many1Till)
 import Prettier.Printer (text, (<+>))
@@ -81,14 +77,6 @@ parseTypeAbs = absMany <$> parsePats <*> parseType
 parseTypeApp :: forall m . Monad m => Type' -> ParserT String m Type'
 parseTypeApp v = app v <$> parseTypeAtom
 
-
-newtype UnificationState =
-  UnificationState {
-    nextVar :: Int
-  , typingAssumptions :: Map ValVar Type'
-  , currentSubstitution :: Map TyVar Type'
-  }
-
 data UnificationError =
     NotInScope ValVar
   | Err String
@@ -101,13 +89,8 @@ instance Show UnificationError where
 instance Eq UnificationError where
   eq = genericEq
 
-type Judgement = Cofree (LambdaF ValVar VoidF) Type'
-
 instance ArrowObject (TT a) where
   arrowObject = Arrow
-
-runInfer :: Value -> Either UnificationError Type'
-runInfer v = head <$> (fst $ runUnification (infer v))
 
 instance Enumerable TyVar where
   fromInt i = TyVar ("t" <> show i)
