@@ -98,23 +98,6 @@ vars (Var v) = Set.singleton v
 vars (App a b) = a `Set.union` b 
 vars (Cat c) = foldr Set.union Set.empty c
 
-class Substitute var cat f m where
-  substitute :: var -> f (LambdaF var cat) -> m Unit
-  substitution :: m (var -> Maybe (f (LambdaF var cat)))
-
-class Rewrite typ m where
-  rewrite :: typ -> m typ
-
-instance
-  ( Substitute var cat f m
-  , Foldable cat
-  , Functor m
-  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Eq var
-  ) => Rewrite (f (LambdaF var cat)) m where
-  rewrite expr = flip replace expr <$> substitution 
-
 replace :: forall var cat f .
            Eq var
         => Foldable cat

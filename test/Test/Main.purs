@@ -6,9 +6,8 @@ import Data.Either (Either(..))
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Language.Lambda.Calculus (rewrite)
-import Language.Lambda.Inference (unify)
-import Language.Void.Type (Type', UnificationError(..), parseType, runInfer, runUnifyT)
+import Language.Lambda.Unification (rewrite, runUnification, unify)
+import Language.Void.Type (Type', UnificationError(..), parseType, runInfer)
 import Language.Void.Value (ValVar(..), Value, parseValue)
 import Parsing (ParseError, runParserT)
 import Parsing.Indent (runIndent)
@@ -25,10 +24,10 @@ main = runTest do
     testExpectErr "x" (NotInScope $ ValVar "x")
 
     testExpectErr "\\x -> x x" $
-                  Err "An infinite type was inferred for an expression: (t1 -> t2) while trying to match type t1" 
+                  Err "An infinite type was inferred for an expression: (t2 -> t3) while trying to match type t2" 
 
     testExpectErr "\\f -> (\\x -> f (x x)) (\\x -> f (x x))" $
-                  Err "An infinite type was inferred for an expression: (t2 -> t3) while trying to match type t2"
+                  Err "An infinite type was inferred for an expression: (t3 -> t4) while trying to match type t3"
     testInferType "\\x -> x" "a -> a"
     testInferType "\\x y -> x" "a -> b -> a"
     testInferType "\\x y -> y" "a -> b -> b"
@@ -69,7 +68,7 @@ data Fixture =
 
 alphaEquivalent :: Type' -> Type' -> Either UnificationError Boolean
 alphaEquivalent t1 t2 = fst do
-    runUnifyT do
+    runUnification do
        _ <- unify t2 t1
        x <- rewrite t2
        pure  (x == t1)
