@@ -3,20 +3,20 @@ module Language.Lambda.Inference where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, (:<))
-import Data.Foldable (class Foldable)
-import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class Context, LambdaF(..), app, cat, rewrite)
+import Data.Tuple (Tuple(..))
+import Data.Tuple.Nested ((/\))
+import Language.Lambda.Calculus (class Rewrite, class Substitute, LambdaF(..), abs, app, cat, rewrite, substitute, var)
 import Language.Void.Value (VoidF(..))
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive)
-import Matryoshka.Class.Recursive (class Recursive)
+import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Fold (cata)
 
 infer :: forall exp var cat m typ .
         Monad m
      => Recursive exp (LambdaF var cat)
-     => Supply typ m
-     => TypingContext var typ m
+     => Fresh typ m
+     => Context var typ m
      => Rewrite typ m
      => Unify typ m
      => Arrow typ
@@ -26,8 +26,8 @@ infer = cata rule
 
 rule :: forall var cat m typ .
         Monad m
-     => Supply typ m
-     => TypingContext var typ m
+     => Fresh typ m
+     => Context var typ m
      => Rewrite typ m
      => Unify typ m
      => Arrow typ
@@ -37,7 +37,7 @@ rule expr =
   case expr of
     Abs b a -> absRule b a  
     App f a -> join $ appRule <$> f <*> a
-    Var v -> askEnvironment v >>= \t -> pure (t :< Var v)
+    Var v -> require v >>= \t -> pure (t :< Var v)
     Cat c -> catRule c
 
 
@@ -49,8 +49,8 @@ instance CatRule var VoidF typ m where
 
 absRule :: forall m typ var cat.
            Bind m
-        => Supply typ m
-        => TypingContext var typ m
+        => Fresh typ m
+        => Context var typ m
         => Rewrite typ m
         => Arrow typ
         => Applicative m
@@ -59,9 +59,9 @@ absRule :: forall m typ var cat.
         -> m (Cofree (LambdaF var cat) typ)
 absRule binding inferBody = do 
   tyBind <- fresh
-  makeAssumption binding tyBind
+  assume binding tyBind
   tyBody <- inferBody
-  tyBind' <- applyCurrentSubstitution tyBind 
+  tyBind' <- rewrite tyBind 
   pure $ (arrow tyBind' (head tyBody)) :< (Abs binding tyBody)
 
 
@@ -69,6 +69,9 @@ appRule :: forall m typ var cat.
            Bind m
         => Unify typ m
         => Applicative m
+        => Arrow typ
+        => Fresh typ m
+        => Rewrite typ m
         => Cofree (LambdaF var cat) typ
         -> Cofree (LambdaF var cat) typ
         -> m (Cofree (LambdaF var cat) typ)
@@ -78,6 +81,13 @@ appRule f a = do
   let argTy = head a
   void $ unify arrArg argTy
   pure $ arrRet :< (App f a)
+  where
+    unifyWithArrow t = do
+       argTy <- fresh
+       retTy <- fresh
+       _ <- unify (arrow argTy retTy) t     
+       Tuple <$> rewrite argTy <*> rewrite retTy
+
 
 
 
@@ -96,30 +106,51 @@ instance
   arrow a b = app (app (cat arrowObject) a) b
  
 
-class TypingContext var typ m | var -> typ where
-  makeAssumption :: var -> typ -> m Unit
-  askEnvironment :: var -> m typ
+class Context var typ m | var -> typ where
+  assume :: var -> typ -> m Unit
+  require :: var -> m typ
 
-class Supply :: Type -> (Type -> Type) -> Constraint
-class Supply typ m where
+class Fresh :: Type -> (Type -> Type) -> Constraint
+class Fresh typ m where
   fresh :: m typ
 
-class Rewrite typ m where
-  applyCurrentSubstitution :: typ -> m typ
 
 class Unify typ m where
   unify :: typ -> typ -> m typ
-  unifyWithArrow :: typ -> m (typ /\ typ)
 
+class UnificationError typ m where
+  unificationError :: typ -> typ -> m typ
 
 instance
-  ( Context var cat f m
-  , Foldable cat
-  , Functor m
+  ( Monad m
+  , Fresh var m 
+  , Eq var
+  , Substitute var cat f m 
+  , Rewrite (f (LambdaF var cat)) m 
   , Recursive (f (LambdaF var cat)) (LambdaF var cat)
   , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Eq var
-  ) => Rewrite (f (LambdaF var cat)) m where
-  applyCurrentSubstitution = rewrite
+  , Unify (cat (f (LambdaF var cat))) m
+  , UnificationError (f (LambdaF var cat)) m
+  ) => Unify (f (LambdaF var cat)) m where
+  unify ta tb = do
+     case project ta /\ project tb of
+       Var a /\ Var b | a == b -> pure ta
+       Var a /\ _ -> substitute a tb *> pure tb
+       _ /\ Var b -> substitute b ta *> pure ta
+       Abs ab aa /\ Abs bb ba -> do
+         qv <- fresh
+         let qty :: f (LambdaF var cat)
+             qty = var qv
+         substitute ab qty
+         substitute bb qty
+         ar <- rewrite aa
+         br <- rewrite ba
+         abs qv <$> unify ar br
+       App ab aa /\ App bb ba -> do
+         app <$> unify ab bb <*> unify aa ba
+       Cat ca /\ Cat cb -> cat <$> unify ca cb
+       _ -> unificationError ta tb
 
+  
+ 
 

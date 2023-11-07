@@ -1,6 +1,5 @@
 module Language.Void.Type where
 
-import Language.Lambda.Inference (class ArrowObject, class Rewrite, class Supply, class TypingContext, class Unify, applyCurrentSubstitution, fresh, infer, unify)
 import Prelude
 
 import Control.Alt ((<|>))
@@ -20,9 +19,10 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
-import Data.Tuple (Tuple(..), fst)
-import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class Context, class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, occursIn, prettyVar, replace, var)
+import Data.Tuple (fst)
+import Data.Tuple.Nested (type (/\))
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Substitute, Lambda, LambdaF(..), absMany, app, cat, occursIn, prettyVar, replace, rewrite, var)
+import Language.Lambda.Inference (class ArrowObject, class Context, class Fresh, class UnificationError, class Unify, fresh, infer, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
 import Language.Void.Value (ValVar, Value, VoidF)
 import Matryoshka.Class.Recursive (project)
@@ -134,10 +134,10 @@ runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a /\ Unific
 runUnifyT (UnifyT f) = runState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty })
 
 
-instance Monad m => Supply Type' (UnifyT m) where
+instance Monad m => Fresh Type' (UnifyT m) where
   fresh = var <$> fresh
 
-instance Monad m => Supply TyVar (UnifyT m) where
+instance Monad m => Fresh TyVar (UnifyT m) where
   fresh = do
     nextVar <- gets (\(UnificationState st) -> st.nextVar)
     let t = TyVar ("t" <> show nextVar)
@@ -146,12 +146,12 @@ instance Monad m => Supply TyVar (UnifyT m) where
                 })
     pure t
 
-instance Monad m => TypingContext ValVar Type' (UnifyT m) where
-  makeAssumption v t =
+instance Monad m => Context ValVar Type' (UnifyT m) where
+  assume v t =
      modify_ (\(UnificationState st) -> UnificationState st {
        typingAssumptions = Map.insert v t st.typingAssumptions
        })
-  askEnvironment v = do
+  require v = do
     UnificationState st <- get
     case Map.lookup v st.typingAssumptions of
       Just t -> pure t
@@ -159,23 +159,12 @@ instance Monad m => TypingContext ValVar Type' (UnifyT m) where
 
 instance
   ( Monad m
-  ) => Context TyVar TT Mu (UnifyT m) where
-  substitution = do
-    UnificationState st <- get
-    pure $ flip Map.lookup st.currentSubstitution
-
-class Substitution var typ m where
-  substitute :: var -> typ -> m Unit
-
-
-instance
-  ( Monad m
-  ) => Substitution TyVar Type' (UnifyT m) where
+  ) => Substitute TyVar TT Mu (UnifyT m) where
   substitute v t' = do
 
-     t <- applyCurrentSubstitution t'
+     t <- rewrite t'
      when (v `occursIn` t) $ throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
-     u <- applyCurrentSubstitution (var v)
+     u <- rewrite (var v)
      case project u of
         Var v' | v' == v -> pure unit 
         _ -> do
@@ -184,36 +173,13 @@ instance
      modify_ (\(UnificationState st) -> UnificationState st {
                 currentSubstitution = Map.insert v t (replace (\x -> if x == v then Just t else Nothing) <$> st.currentSubstitution)
               })
+  substitution = do
+    UnificationState st <- get
+    pure $ flip Map.lookup st.currentSubstitution
 
-instance
-  ( Monad m
-  , Supply TyVar (UnifyT m)
-  , Substitution TyVar Type' (UnifyT m)
-  , Rewrite Type' (UnifyT m)
-  ) => Unify Type' (UnifyT m) where
-  unify ta tb = do
-     case project ta /\ project tb of
-       Var a /\ Var b | a == b -> pure ta
-       Var a /\ _ -> substitute a tb *> pure tb
-       _ /\ Var b -> substitute b ta *> pure ta
-       Abs ab aa /\ Abs bb ba -> do
-         qv <- fresh
-         let qty :: Type'
-             qty = var qv
-         substitute ab qty 
-         substitute bb qty 
-         ar <- applyCurrentSubstitution aa
-         br <- applyCurrentSubstitution ba
-         In <<< Abs qv <$> unify ar br
-       App ab aa /\ App bb ba -> do
-         In <$> (App <$> unify ab bb <*> unify aa ba)
-       Cat ca /\ Cat cb | ca == cb -> pure ta
-       _ -> throwError $ UnificationError ta tb
-  unifyWithArrow t = do
-     argTy <- var <$> fresh
-     retTy <- var <$> fresh
-     _ <- unify (In (App (In (App (In (Cat Arrow)) argTy)) retTy)) t     
-     Tuple <$> applyCurrentSubstitution argTy <*> applyCurrentSubstitution retTy
+instance Applicative m => Unify (TT Type') m where
+  unify Arrow Arrow = pure Arrow
 
-  
-  
+instance Monad m => UnificationError Type' (UnifyT m) where 
+  unificationError t = throwError <<< UnificationError t
+

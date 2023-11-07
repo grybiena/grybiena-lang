@@ -6,7 +6,8 @@ import Data.Either (Either(..))
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Language.Lambda.Inference (applyCurrentSubstitution, unify)
+import Language.Lambda.Calculus (rewrite)
+import Language.Lambda.Inference (unify)
 import Language.Void.Type (Type', UnificationError(..), parseType, runInfer, runUnifyT)
 import Language.Void.Value (ValVar(..), Value, parseValue)
 import Parsing (ParseError, runParserT)
@@ -70,7 +71,7 @@ alphaEquivalent :: Type' -> Type' -> Either UnificationError Boolean
 alphaEquivalent t1 t2 = fst do
     runUnifyT do
        _ <- unify t2 t1
-       x <- applyCurrentSubstitution t2
+       x <- rewrite t2
        pure  (x == t1)
       
 
