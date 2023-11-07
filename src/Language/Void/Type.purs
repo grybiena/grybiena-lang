@@ -2,10 +2,13 @@ module Language.Void.Type where
 
 import Prelude
 
+import Control.Alt ((<|>))
+import Control.Lazy (defer)
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Except.Trans (class MonadThrow)
 import Control.Monad.State (class MonadState, StateT, get, gets, modify_, runState)
 import Data.Either (Either)
+import Data.Eq (class Eq1)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
@@ -17,10 +20,13 @@ import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, app, prettyVar, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
 import Language.Lambda.Infer (class AbsRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, fresh, infer, judgement, substitute, unify)
+import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
 import Language.Void.Value (ValVar, Value)
 import Matryoshka.Class.Recursive (project)
+import Parsing (ParserT)
+import Parsing.Combinators (many1Till)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (pretty)
 
@@ -35,6 +41,10 @@ instance Functor TT where
   map _ Arrow = Arrow
 instance Eq (TT a) where
   eq  _ _ = true
+instance Eq1 TT where
+  eq1  _ _ = true
+
+
 
 type Type' = Lambda TyVar TT
 
@@ -51,6 +61,28 @@ newtype TyVar = TyVar String
 derive newtype instance Show TyVar
 derive newtype instance Ord TyVar
 derive newtype instance Eq TyVar
+
+parseType :: forall m . Monad m => ParserT String m Type'
+parseType = buildPostfixParser [parseTypeArrow, parseTypeApp] parseTypeAtom 
+
+parseTypeAtom :: forall m . Monad m => ParserT String m Type'
+parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< TyVar) <$> identifier) <|> (parens parseType)
+
+parseTypeArrow :: forall m . Monad m => Type' -> ParserT String m Type'
+parseTypeArrow a = do
+  reservedOp "->"
+  b <- parseType
+  pure (app (app (cat Arrow) a) b)
+
+
+parseTypeAbs :: forall m . Monad m => ParserT String m Type'
+parseTypeAbs = absMany <$> parsePats <*> parseType
+  where
+    parsePats = reservedOp "forall" *> many1Till (TyVar <$> identifier) (reservedOp ".")
+
+parseTypeApp :: forall m . Monad m => Type' -> ParserT String m Type'
+parseTypeApp v = app v <$> parseType
+
 
 newtype UnificationState =
   UnificationState {

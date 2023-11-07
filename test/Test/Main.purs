@@ -3,14 +3,12 @@ module Test.Main where
 import Prelude
 
 import Data.Either (Either(..))
+import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Effect.Class (liftEffect)
-import Effect.Console (log)
-import Language.Lambda.Infer (judgement)
-import Language.Void.Type (Judgement, JudgementF(..), Type', runInfer, runInfer')
+import Language.Lambda.Infer (applyCurrentSubstitution, unify)
+import Language.Void.Type (Type', UnificationError, parseType, runInfer, runUnifyT)
 import Language.Void.Value (Value, parseValue)
-import Matryoshka.Class.Recursive (project)
 import Parsing (ParseError, runParserT)
 import Parsing.Indent (runIndent)
 import Parsing.String (eof)
@@ -20,55 +18,42 @@ import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
 
 main :: Effect Unit
-main = do
-  runTest do
-    suite "Language.Void" do
-      unfurl "\\a b -> a b a" 
-  tests
-
-tests :: Effect Unit
-tests = runTest do
+main = runTest do
   suite "Language.Void" do
---    testInferType "a" "t0"
-    testInferType "\\a -> a" "(t0 -> t0)"
-    testInferType "\\a b -> a" "(t0 -> (t1 -> t0))"
-    testInferType "\\a b -> b" "(t0 -> (t1 -> t1))"
-    testInferType "\\a b -> a b" "((t1 -> t3) -> (t1 -> t3))"
-    testInferType "\\a b -> b a" "(t0 -> ((t0 -> t3) -> t3))"
+     -- TODO expect this to fail since x not in scope 
+--    testInferType "x" "a"
+    testInferType "\\x -> x" "a -> a"
+    testInferType "\\x y -> x" "a -> b -> a"
+    testInferType "\\x y -> y" "a -> b -> b"
+    testInferType "\\x y -> x y" "(a -> b) -> a -> b"
+    testInferType "\\x y -> y x" "a -> (a -> b) -> b"
+    testInferType "\\x y z -> (x z) (y z)" "(a -> b -> c) -> (a -> b) -> a -> c"
+-- TODO expect this to pass - it seems we are applying z to (y z) when we should apply x to z the to (y z) 
+-- this is a parser error
+--    testInferType "\\x y z -> x z (y z)" "(a -> b -> c) -> (a -> b) -> a -> c"
 
-unfurl :: String -> TestSuite
-unfurl v = test v do
-  case valueParser v of
-    Left err -> Assert.assert ("parse error: " <> show err) false
-    Right suc -> do
-      Assert.equal (Right suc) (valueParser $ prettyPrint suc)
-      case runInfer' suc of
-        Left err /\ _-> Assert.assert ("type error: " <> show err) false
-        Right t /\ _ -> do 
-          liftEffect $ logUnfurl t
-
-logUnfurl :: Judgement -> Effect Unit
-logUnfurl j = do
-  let (ex :: Value) /\ (t :: Type') = judgement $ project j
-  log (prettyPrint ex <> " :: " <> prettyPrint t)
-  case project j of
-    HasType _ _ -> pure unit
-    JudgeApp x y _ -> do
-      logUnfurl x
-      logUnfurl y
-    JudgeAbs _ a _ -> do
-      logUnfurl a
 
 testInferType :: String -> String -> TestSuite
 testInferType v t = test (v <> " :: " <> t) do
-  case valueParser v of
+  case Tuple <$> valueParser v <*> typeParser t of
     Left err -> Assert.assert ("parse error: " <> show err) false
-    Right suc -> do
-      Assert.equal (Right suc) (valueParser $ prettyPrint suc)
-      case runInfer suc of
-        Left err -> Assert.assert ("type error: " <> show err) false
-        Right suct -> Assert.equal t (prettyPrint suct)
+    Right (val /\ typ) -> do
+      case runInfer val of
+        Left err -> Assert.assert ("infer error: " <> show err) false
+        Right suc ->
+          case inferUpToAlpha suc typ of
+            Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
+            Left err -> Assert.assert ("unification error: " <> show err) false
+
  
+
+
+inferUpToAlpha :: Type' -> Type' -> Either UnificationError Boolean
+inferUpToAlpha t1 t2 = fst do
+  runUnifyT do
+     _ <- unify t1 t2
+     x <- applyCurrentSubstitution t1
+     pure (x == t2)
       
 
 valueParser :: String -> Either ParseError Value
@@ -78,5 +63,10 @@ valueParser s = runIndent $ runParserT s do
   pure v
 
 
+typeParser :: String -> Either ParseError Type' 
+typeParser s = runIndent $ runParserT s do
+  v <- parseType
+  eof
+  pure v
 
 

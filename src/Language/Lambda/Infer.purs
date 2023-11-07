@@ -24,20 +24,20 @@ infer :: forall exp var cat m typ jujF juj.
       => VarRule var typ (jujF juj)
       => CatRule cat (m juj)
       => exp -> m juj
-infer = cata judge
+infer = cata rule
 
-judge :: forall var cat m typ jujF juj.
-         Monad m
-      => Corecursive juj jujF
-      => Supply typ m
-      => TypingContext var typ m
-      => Rewrite typ m
-      => AbsRule var typ jujF juj
-      => AppRule jujF juj m
-      => VarRule var typ (jujF juj)
-      => CatRule cat (m juj)
-      => Algebra (LambdaF var cat) (m juj) 
-judge =
+rule :: forall var cat m typ jujF juj.
+        Monad m
+     => Corecursive juj jujF
+     => Supply typ m
+     => TypingContext var typ m
+     => Rewrite typ m
+     => AbsRule var typ jujF juj
+     => AppRule jujF juj m
+     => VarRule var typ (jujF juj)
+     => CatRule cat (m juj)
+     => Algebra (LambdaF var cat) (m juj) 
+rule =
   case _ of
     Abs binding inferBody -> do
        tyBind <- fresh
