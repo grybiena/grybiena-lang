@@ -26,8 +26,8 @@ instance
   ( Eq var
   , Eq1 cat
   ) => Eq1 (LambdaF var cat) where
-  eq1 (Abs i _) (Abs j _) = i == j
-  eq1 (App _ _) (App _ _) = true
+  eq1 (Abs i a) (Abs j b) = i == j && a == b
+  eq1 (App ax bx) (App ay by) = ax == ay && bx == by
   eq1 (Var i) (Var j) = i == j
   eq1 (Cat a) (Cat b) = eq1 a b
   eq1 _ _ = false

@@ -62,12 +62,21 @@ testExpectErr v e = test (v <> " :: _|_") do
         Right _ -> Assert.assert "Expected failure but got success" false
 
 
+
+
+
+data Outcome =
+    ExpectError { term :: String, err :: UnificationError }
+  | ExpectInfer { term :: String, typ :: String }
+ 
+
+
 alphaEquivalent :: Type' -> Type' -> Either UnificationError Boolean
 alphaEquivalent t1 t2 = fst do
-  runUnifyT do
-     _ <- unify t1 t2
-     x <- applyCurrentSubstitution t1
-     pure (x == t2)
+    runUnifyT do
+       _ <- unify t2 t1
+       x <- applyCurrentSubstitution t2
+       pure  (x == t1)
       
 
 valueParser :: String -> Either ParseError Value
