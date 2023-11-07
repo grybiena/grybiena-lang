@@ -5,7 +5,7 @@ import Prelude
 import Control.Comonad.Cofree (Cofree, head, (:<))
 import Data.Foldable (class Foldable)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class Context, LambdaF(..), rewrite)
+import Language.Lambda.Calculus (class Context, LambdaF(..), app, cat, rewrite)
 import Language.Void.Value (VoidF(..))
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive)
@@ -85,6 +85,16 @@ appRule f a = do
 
 class Arrow typ where
   arrow :: typ -> typ -> typ
+
+class ArrowObject cat where
+  arrowObject :: cat 
+
+instance
+  ( ArrowObject (cat (f (LambdaF var cat)))
+  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+  ) => Arrow (f (LambdaF var cat)) where
+  arrow a b = app (app (cat arrowObject) a) b
+ 
 
 class TypingContext var typ m | var -> typ where
   makeAssumption :: var -> typ -> m Unit

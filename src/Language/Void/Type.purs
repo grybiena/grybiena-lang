@@ -1,8 +1,10 @@
 module Language.Void.Type where
 
+import Language.Lambda.Inference (class ArrowObject, class Rewrite, class Supply, class TypingContext, class Unify, applyCurrentSubstitution, fresh, infer, unify)
 import Prelude
 
 import Control.Alt ((<|>))
+import Control.Comonad.Cofree (Cofree, head)
 import Control.Lazy (defer)
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Except.Trans (class MonadThrow)
@@ -18,13 +20,11 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
-import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class Context, class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, occursIn, prettyVar, replace, var)
-import Language.Lambda.Infer (class AbsRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, expression, fresh, infer, substitute, typing, unify)
+import Language.Lambda.Calculus (class Context, class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, occursIn, prettyVar, replace, var)
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
-import Language.Void.Value (ValVar, Value)
+import Language.Void.Value (ValVar, Value, VoidF)
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParserT)
 import Parsing.Combinators (many1Till)
@@ -116,55 +116,10 @@ derive newtype instance Monad m => Monad (UnifyT m)
 derive newtype instance Monad m => MonadState UnificationState (UnifyT m)
 derive newtype instance Monad m => MonadThrow UnificationError (UnifyT m)
 
-data JudgementF var typ a =
-    HasType var typ
-  | JudgeApp a a typ
-  | JudgeAbs var a typ
+type Judgement = Cofree (LambdaF ValVar VoidF) Type'
 
-
-type Judgement = Mu (JudgementF ValVar Type')
-
-instance VarRule var typ (JudgementF var typ (Mu (JudgementF var typ))) where
-  varRule = HasType
-
-instance AbsRule ValVar Type' (JudgementF ValVar Type') Judgement where
-  absRule b t j =
-    let ret = typing $ project j
-      in JudgeAbs b j (In (App (In (App (In (Cat Arrow)) t)) ret)) 
-
-instance TypingApplication Type' (JudgementF ValVar Type') Judgement where
-  typingApplication a b t = JudgeApp a b t
-
-instance TypingJudgement Value Type' (JudgementF ValVar Type') Judgement where
-  typing (HasType _ t) = t
-  typing (JudgeApp _ _ t) = t
-  typing (JudgeAbs _ _ t) = t
-  expression (HasType e _) = var e
-  expression (JudgeApp a b _) = app (expression $ project a) (expression $ project b)
-  expression (JudgeAbs a b _) = abs a (expression $ project b)
-
-
-instance Functor (JudgementF exp typ) where
-  map _ (HasType e i) = HasType e i
-  map f (JudgeApp a b t) = JudgeApp (f a) (f b) t
-  map f (JudgeAbs a b t) = JudgeAbs a (f b) t
-
-instance Foldable (JudgementF exp typ) where
-  foldr _ b (HasType _ _) = b
-  foldr f b (JudgeApp x y _) = f y (f x b) 
-  foldr f b (JudgeAbs _ y _) = f y b
-  foldl _ b (HasType _ _) = b
-  foldl f b (JudgeApp x y _) = f (f b y) x
-  foldl f b (JudgeAbs _ y _) = f b y
-  foldMap _ (HasType _ _) = mempty
-  foldMap f (JudgeApp x y _) = f x <> f y
-  foldMap f (JudgeAbs _ y _) = f y
-
-instance Traversable (JudgementF exp typ) where
-  traverse _ (HasType e t) = pure $ HasType e t
-  traverse f (JudgeApp a b t) = (\ta tb -> JudgeApp ta tb t) <$> f a <*> f b
-  traverse f (JudgeAbs a b t) = (\tb -> JudgeAbs a tb t) <$> f b
-  sequence = traverse identity
+instance ArrowObject (TT a) where
+  arrowObject = Arrow
 
 runInfer' :: Value -> Either UnificationError Judgement /\ UnificationState
 runInfer' v = runUnifyT (infer v)
@@ -173,7 +128,7 @@ runInfer :: Value -> Either UnificationError Type'
 runInfer v = foo <$> (fst $ runUnifyT (infer v))
   where
     foo :: Judgement -> Type'
-    foo j = let t = typing (project j) in t
+    foo j = let t = head j in t
 
 runUnifyT :: forall a . UnifyT Identity a -> Either UnificationError a /\ UnificationState
 runUnifyT (UnifyT f) = runState (runExceptT f) (UnificationState { nextVar: 0, typingAssumptions: Map.empty, currentSubstitution: Map.empty })
@@ -208,6 +163,10 @@ instance
   substitution = do
     UnificationState st <- get
     pure $ flip Map.lookup st.currentSubstitution
+
+class Substitution var typ m where
+  substitute :: var -> typ -> m Unit
+
 
 instance
   ( Monad m
