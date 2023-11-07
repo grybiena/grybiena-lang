@@ -98,7 +98,21 @@ vars (Var v) = Set.singleton v
 vars (App a b) = a `Set.union` b 
 vars (Cat c) = foldr Set.union Set.empty c
 
-rewrite :: forall var cat f .
+class Context var cat f m where
+  substitution :: m (var -> Maybe (f (LambdaF var cat)))
+
+rewrite :: forall var cat f m.
+           Eq var
+        => Foldable cat
+        => Functor m
+        => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+        => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+        => Context var cat f m
+        => f (LambdaF var cat)
+        -> m (f (LambdaF var cat)) 
+rewrite expr = flip replace expr <$> substitution 
+
+replace :: forall var cat f .
            Eq var
         => Foldable cat
         => Recursive (f (LambdaF var cat)) (LambdaF var cat)
@@ -106,7 +120,7 @@ rewrite :: forall var cat f .
         => (var -> Maybe (f (LambdaF var cat)))
         -> f (LambdaF var cat)
         -> f (LambdaF var cat)
-rewrite = cata <<< onVar
+replace = cata <<< onVar
 
 
 onVar :: forall var cat f .

@@ -16,13 +16,12 @@ import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), maybe)
-import Data.Set as Set
+import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, occursIn, prettyVar, rewrite, universe, var)
+import Language.Lambda.Calculus (class Context, class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, occursIn, prettyVar, replace, var)
 import Language.Lambda.Infer (class AbsRule, class Rewrite, class Substitution, class Supply, class TypingApplication, class TypingContext, class TypingJudgement, class Unify, class VarRule, applyCurrentSubstitution, expression, fresh, infer, substitute, typing, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
 import Language.Void.Value (ValVar, Value)
@@ -205,21 +204,10 @@ instance Monad m => TypingContext ValVar Type' (UnifyT m) where
 
 instance
   ( Monad m
-  ) => Rewrite Type' (UnifyT m) where
-  applyCurrentSubstitution t =
-    case project t of
-      Var v -> do
-        UnificationState st <- get
-        maybe (pure t) pure (Map.lookup v st.currentSubstitution)
-      App a b -> do
-        a' <- applyCurrentSubstitution a
-        b' <- applyCurrentSubstitution b
-        pure $ app a' b'
-      Abs v a -> do
-        a' <- applyCurrentSubstitution a
-        -- TODO what if v gets substituted????
-        pure $ abs v a'
-      Cat _ -> pure t
+  ) => Context TyVar TT Mu (UnifyT m) where
+  substitution = do
+    UnificationState st <- get
+    pure $ flip Map.lookup st.currentSubstitution
 
 instance
   ( Monad m
@@ -235,7 +223,7 @@ instance
           void $ unify u t
      -- apply new substitution to all existing substitutions
      modify_ (\(UnificationState st) -> UnificationState st {
-                currentSubstitution = Map.insert v t (rewrite (\x -> if x == v then Just t else Nothing) <$> st.currentSubstitution)
+                currentSubstitution = Map.insert v t (replace (\x -> if x == v then Just t else Nothing) <$> st.currentSubstitution)
               })
 
 instance

@@ -2,8 +2,9 @@ module Language.Lambda.Infer where
 
 import Prelude
 
+import Data.Foldable (class Foldable)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (LambdaF(..))
+import Language.Lambda.Calculus (class Context, LambdaF(..), rewrite)
 import Language.Void.Value (VoidF(..))
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
@@ -110,5 +111,15 @@ class Substitution var typ m where
 
 class Rewrite typ m where
   applyCurrentSubstitution :: typ -> m typ
+
+instance
+  ( Context var cat f m
+  , Foldable cat
+  , Functor m
+  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
+  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+  , Eq var
+  ) => Rewrite (f (LambdaF var cat)) m where
+  applyCurrentSubstitution = rewrite
 
 
