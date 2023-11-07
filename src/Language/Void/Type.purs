@@ -9,6 +9,7 @@ import Control.Monad.Except.Trans (class MonadThrow)
 import Control.Monad.State (class MonadState, StateT, get, gets, modify_, runState)
 import Data.Either (Either)
 import Data.Eq (class Eq1)
+import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
@@ -28,7 +29,7 @@ import Matryoshka.Class.Recursive (project)
 import Parsing (ParserT)
 import Parsing.Combinators (many1Till)
 import Prettier.Printer (text, (<+>))
-import Pretty.Printer (pretty)
+import Pretty.Printer (pretty, prettyPrint)
 
 data TT :: forall k. k -> Type
 data TT a =
@@ -81,7 +82,7 @@ parseTypeAbs = absMany <$> parsePats <*> parseType
     parsePats = reservedOp "forall" *> many1Till (TyVar <$> identifier) (reservedOp ".")
 
 parseTypeApp :: forall m . Monad m => Type' -> ParserT String m Type'
-parseTypeApp v = app v <$> parseType
+parseTypeApp v = app v <$> parseTypeAtom
 
 
 newtype UnificationState =
@@ -100,7 +101,8 @@ data UnificationError =
 derive instance Generic UnificationError _
 instance Show UnificationError where
   show = genericShow
-
+instance Eq UnificationError where
+  eq = genericEq
 newtype UnifyT m a = UnifyT (ExceptT UnificationError (StateT UnificationState m) a)
 derive newtype instance Functor m => Functor (UnifyT m)
 derive newtype instance Monad m => Apply (UnifyT m)
@@ -222,7 +224,7 @@ instance
   substitute v t' = do
 
      t <- applyCurrentSubstitution t'
-     occursCheck v t
+     when (occursCheck v t) $ throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
      u <- applyCurrentSubstitution (var v)
      case project u of
         Var v' | v' == v -> pure unit 
@@ -247,18 +249,13 @@ rewrite f t =
 
 
 
-occursCheck :: forall m. Monad m => TyVar -> Type' -> UnifyT m Unit
+occursCheck :: TyVar -> Type' -> Boolean
 occursCheck u t = do
   case project t of
-    Var v -> do
-      when (u == v) $ throwError $ Err $ "Occurs check"
-    App a b -> do
-      occursCheck u a
-      occursCheck u b
-    Abs v a -> do
-      when (u == v) $ throwError $ Err "Occurs check"
-      occursCheck u a
-    Cat _ -> pure unit
+    Var v -> u == v
+    App a b -> occursCheck u a || occursCheck u b
+    Abs v a -> u == v || occursCheck u a
+    Cat _ -> false
 
 
 
