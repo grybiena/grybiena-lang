@@ -3,6 +3,7 @@ module Language.Void.Type where
 import Prelude
 
 import Control.Alt ((<|>))
+import Control.Comonad.Cofree ((:<))
 import Control.Lazy (defer)
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
@@ -11,9 +12,10 @@ import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, prettyVar, var)
-import Language.Lambda.Inference (class ArrowObject)
+import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
 import Language.Lambda.Unification (class Enumerable, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError)
 import Language.Parser.Common (buildPostfixParser, identifier, parens, reservedOp)
+import Language.Void.Kind (KI(..), Kind')
 import Language.Void.Value (ValVar, Value)
 import Parsing (ParserT)
 import Parsing.Combinators (many1Till)
@@ -107,5 +109,9 @@ instance UnificationError Type' UnificationError where
 
 instance Applicative m => Unification (TT Type') m where
   unify Arrow Arrow = pure Arrow
+
+instance Applicative m => Inference TyVar TT Kind' m where
+  inference Arrow = pure $ (arrow (cat KStar) (arrow (cat KStar) (cat KStar)) :< Cat Arrow)
+
 
 
