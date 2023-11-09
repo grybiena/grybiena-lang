@@ -4,6 +4,7 @@
     dependencies =
       [ fixed-points
         matryoshka
+        open-memoize
         ordered-collections
         parsing
         prettier-printer
