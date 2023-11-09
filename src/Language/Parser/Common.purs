@@ -16,11 +16,14 @@ type Parser a = IndentParser String a
 tokenParser :: GenTokenParser String Identity 
 tokenParser = makeTokenParser (let LanguageDef def = haskellStyle
                                 in LanguageDef (def { reservedOpNames = [ "=", "::", ",", ".", "\\", "->"]
-                                                    , reservedNames = [ "forall", "type", "data", "String", "Int", "_", "log"]
+                                                    , reservedNames = [ "forall", "type", "data", "String", "Int", "Number", "_" ]
                                                     }))
 
 integer :: forall m . Monad m => ParserT String m Int
 integer = mapParserT (\(Identity r) -> pure r) tokenParser.integer 
+
+number :: forall m . Monad m => ParserT String m Number
+number = mapParserT (\(Identity r) -> pure r) tokenParser.float
 
 reservedOp :: forall m. Monad m => String -> ParserT String m Unit
 reservedOp s = mapParserT (\(Identity r) -> pure r) (tokenParser.reservedOp s)
