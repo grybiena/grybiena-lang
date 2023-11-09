@@ -7,6 +7,7 @@ import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Grybu (Term, UnificationError(..), Var(..), parseValue, parseType)
+import Language.Lambda.Calculus (universe)
 import Language.Lambda.Inference (runInference)
 import Language.Lambda.Unification (rewrite, runUnification, unify)
 import Parsing (ParseError, runParserT)
@@ -39,6 +40,11 @@ grybuTests = runTest do
     testInferType "1" "Int"
     testInferType "1.0" "Number"
 
+    testInferType "1 :: Int" "Int"
+    testInferType "\\a -> a :: Int" "Int -> Int"
+
+    testInferType "1 :: Int :: *" "Int" 
+
 
     testInferKind "forall a . a" "k -> k"
     testInferKind "forall a b. a b" "(k -> j) -> (k -> j)" 
@@ -48,13 +54,18 @@ grybuTests = runTest do
 
     testInferKind "*" "**"
     testInferKind "* -> *" "*"
+    testInferKind "* :: ** :: *** :: ****" "*"
+    testInferKind "* :: ** :: *** :: ****" "**"
+    testInferKind "****" "*"
 
     testInferKind "Int" "*"
     testInferKind "Number" "*"
 
 
+
+
 testInferType :: String -> String -> TestSuite
-testInferType v t = test (v <> " :: " <> t) do
+testInferType v t = test ("(" <> v <> ") :: " <> t) do
   case Tuple <$> termParser v <*> typeParser t of
     Left err -> Assert.assert ("parse error: " <> show err) false
     Right (val /\ typ) -> do
@@ -67,7 +78,7 @@ testInferType v t = test (v <> " :: " <> t) do
 
 
 testInferKind :: String -> String -> TestSuite
-testInferKind v t = test (v <> " :: " <> t) do
+testInferKind v t = test ("(" <> v <> ") :: " <> t) do
   case Tuple <$> typeParser v <*> typeParser t of
     Left err -> Assert.assert ("parse error: " <> show err) false
     Right (val /\ typ) -> do
@@ -81,7 +92,7 @@ testInferKind v t = test (v <> " :: " <> t) do
 
 
 testExpectErr :: String -> UnificationError -> TestSuite
-testExpectErr v e = test (v <> " :: _|_") do
+testExpectErr v e = test ("(" <> v <> ") :: _|_") do
   case termParser v of
     Left err -> Assert.assert ("parse error: " <> show err) false
     Right (val :: Term) -> do
@@ -96,12 +107,12 @@ alphaEquivalent t1 t2 = do
     runUnification do
        _ <- unify t2 t1
        x <- rewrite t2
-       pure  (x == t1)
+       pure  (universe x == universe t1)
   b <- fst do
     runUnification do
        _ <- unify t1 t2
        x <- rewrite t1
-       pure  (x == t2)
+       pure  (universe x == universe t2)
   pure (a && b)
 
 
