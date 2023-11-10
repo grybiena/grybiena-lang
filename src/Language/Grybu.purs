@@ -6,7 +6,7 @@ import Control.Alt ((<|>))
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Lazy (defer)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
-import Control.Monad.Rec.Class (Step(..))
+import Control.Monad.Rec.Class (class MonadRec, Step(..))
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate, (..))
 import Data.Eq (class Eq1)
@@ -14,14 +14,19 @@ import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
+import Data.Map (Map)
+import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
+import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, prettyVar, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
-import Machine.Krivine (class Transition, Halt(..))
+import Machine.Closure (Closure)
+import Machine.Context (class Context)
+import Machine.Krivine (class Transition, Halt(..), evalUnbounded)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -39,6 +44,7 @@ data TT a =
 
   | Int Int
   | TypeInt
+  | IntPlus
 
   | Number Number
   | TypeNumber
@@ -58,6 +64,7 @@ instance Functor TT where
   map _ TypeInt = TypeInt
   map _ (Number n) = Number n
   map _ TypeNumber = TypeNumber
+  map _ IntPlus = IntPlus
 
 
 instance Eq a => Eq (TT a) where
@@ -99,18 +106,22 @@ instance PrettyLambda Var TT where
   prettyCat TypeInt = text "Int"
   prettyCat (Number i) = text $ show i
   prettyCat TypeNumber = text "Number"
+  prettyCat IntPlus = text "intPlus"
 
 parseValue :: forall m . Monad m => ParserT String m Term
 parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
 
 parseValueAtom :: forall m . Monad m => ParserT String m Term
-parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> (parens parseValue)
+parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseIntPlus <|> (parens parseValue)
 
 parseNumeric :: forall m . Monad m => ParserT String m Term
 parseNumeric = (try parseNumber) <|> parseInt
 
 parseInt :: forall m . Monad m => ParserT String m Term
 parseInt = cat <<< Int <$> integer
+ 
+parseIntPlus :: forall m . Monad m => ParserT String m Term
+parseIntPlus = reserved "intPlus" *> pure (cat IntPlus)
  
 parseNumber :: forall m . Monad m => ParserT String m Term
 parseNumber = cat <<< Number <$> number
@@ -225,6 +236,7 @@ instance
   inference TypeInt = pure $ (cat (Star 1) :< Cat TypeInt)
   inference (Number n) = pure $ cat TypeNumber :< Cat (Number n)
   inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
+  inference IntPlus = pure (arrow (cat TypeInt) (arrow (cat TypeInt) (cat (TypeInt))) :< Cat IntPlus)
 
 data GHalt =
     MachineError String
@@ -237,9 +249,23 @@ instance Show GHalt where
 instance Eq GHalt where
   eq = genericEq
 
-instance Applicative m => Transition Mu Var TT ctx GHalt m where
+instance
+  ( MonadRec m
+  , Context Var (Closure Mu Var TT Map) Map
+  ) => Transition Mu Var TT Map GHalt m where
   transition (Int i) _ = pure $ Done $ Halt (PureInt i)
   transition (Number n) _ = pure $ Done $ Halt (PureNumber n)
+  transition IntPlus (Just machine) = do
+     let a1 = head machine
+     case tail machine of
+        Nothing -> pure $ Done $ Halt $ MachineError "intPlus empty stack"
+        Just machine' -> do
+          let a2 = head machine'
+          r1 <- evalUnbounded a1
+          r2 <- evalUnbounded a2
+          case r1 /\ r2 of
+            (Halt (PureInt i1) /\ Halt (PureInt i2)) -> pure $ Done $ Halt (PureInt (i1 + i2))
+            _ -> pure $ Done $ Halt $ MachineError "not ints"
   transition e _ = pure $ Done $ Halt $ MachineError $ show e 
 
 

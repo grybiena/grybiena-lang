@@ -46,6 +46,8 @@ grybuTests = runTest do
     testInferType "1" "Int"
     testInferType "1.0" "Number"
 
+    testInferType "intPlus 1 1" "Int"
+
     testInferType "1 :: Int" "Int"
     testInferType "\\a -> a :: Int" "Int -> Int"
 
@@ -70,6 +72,9 @@ grybuTests = runTest do
 
     testRun "1" (PureInt 1)
     testRun "1.0" (PureNumber 1.0)
+    testRun "intPlus 1 1" (PureInt 2)
+    testRun "intPlus (intPlus 1 1) (intPlus 1 1)" (PureInt 4)
+
 
 testInferType :: String -> String -> TestSuite
 testInferType v t = test ("(" <> v <> ") :: " <> t) do

@@ -75,3 +75,11 @@ runUnbounded :: forall f var cat ctx halt m .
 runUnbounded = tailRecM step
 
 
+evalUnbounded :: forall f var cat ctx halt m .
+                 MonadRec m
+              => Context var (Closure f var cat ctx) ctx
+              => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+              => Transition f var cat ctx halt m
+              => Closure f var cat ctx -> m (Halt var halt)
+evalUnbounded c = runUnbounded (c :< Nothing)
+
