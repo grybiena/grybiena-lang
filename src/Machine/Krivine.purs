@@ -7,7 +7,10 @@ import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
+import Data.Eq.Generic (genericEq)
+import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), maybe)
+import Data.Show.Generic (genericShow)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (LambdaF(..))
 import Machine.Closure (Closure(..), closure)
@@ -29,6 +32,12 @@ data Halt var halt =
     ContextFault var
   | StackFault
   | Halt halt
+
+derive instance Generic (Halt var halt) _
+instance (Show var, Show halt) => Show (Halt var halt) where
+  show = genericShow
+instance (Eq var, Eq halt) => Eq (Halt var halt) where
+  eq = genericEq
 
 -- | A Krivine Machine Step
 -- Abs ~ pop, bind, and evaluate the body

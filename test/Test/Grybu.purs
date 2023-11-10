@@ -2,14 +2,20 @@ module Test.Grybu where
 
 import Prelude
 
+import Control.Comonad.Cofree ((:<))
 import Data.Either (Either(..))
+import Data.Identity (Identity(..))
+import Data.Map as Map
+import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Language.Grybu (Term, UnificationError(..), Var(..), parseValue, parseType)
+import Language.Grybu (GHalt(..), Term, UnificationError(..), Var(..), parseType, parseValue)
 import Language.Lambda.Calculus (universe)
 import Language.Lambda.Inference (runInference)
 import Language.Lambda.Unification (rewrite, runUnification, unify)
+import Machine.Closure (closure)
+import Machine.Krivine (Halt(..), runUnbounded)
 import Parsing (ParseError, runParserT)
 import Parsing.Indent (runIndent)
 import Parsing.String (eof)
@@ -62,7 +68,8 @@ grybuTests = runTest do
     testInferKind "Number" "*"
 
 
-
+    testRun "1" (PureInt 1)
+    testRun "1.0" (PureNumber 1.0)
 
 testInferType :: String -> String -> TestSuite
 testInferType v t = test ("(" <> v <> ") :: " <> t) do
@@ -76,6 +83,16 @@ testInferType v t = test ("(" <> v <> ") :: " <> t) do
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
             Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> show err) false
 
+testRun :: String -> GHalt -> TestSuite
+testRun v h = test ("run (" <> v <> ")") do
+  case termParser v of
+    Left err -> Assert.assert ("parse error: " <> show err) false
+    Right val -> do
+      case runUnbounded (closure val Map.empty :< Nothing) of
+        res | res == Identity (Halt h) -> pure unit
+        res -> Assert.assert (show res) false
+ 
+ 
 
 testInferKind :: String -> String -> TestSuite
 testInferKind v t = test ("(" <> v <> ") :: " <> t) do

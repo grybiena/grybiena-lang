@@ -6,6 +6,7 @@ import Control.Alt ((<|>))
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Lazy (defer)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
+import Control.Monad.Rec.Class (Step(..))
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate, (..))
 import Data.Eq (class Eq1)
@@ -20,6 +21,7 @@ import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, La
 import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
+import Machine.Krivine (class Transition, Halt(..))
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -224,7 +226,20 @@ instance
   inference (Number n) = pure $ cat TypeNumber :< Cat (Number n)
   inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
 
+data GHalt =
+    MachineError String
+  | PureInt Int
+  | PureNumber Number
 
+derive instance Generic GHalt _
+instance Show GHalt where
+  show = genericShow
+instance Eq GHalt where
+  eq = genericEq
 
+instance Applicative m => Transition Mu Var TT ctx GHalt m where
+  transition (Int i) _ = pure $ Done $ Halt (PureInt i)
+  transition (Number n) _ = pure $ Done $ Halt (PureNumber n)
+  transition e _ = pure $ Done $ Halt $ MachineError $ show e 
 
 
