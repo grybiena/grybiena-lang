@@ -5,52 +5,64 @@ module Machine.Krivine where
 
 import Prelude
 
-import Control.Comonad (extend)
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
-import Control.Comonad.Store (class ComonadStore, peek, pos)
-import Control.Monad.Rec.Class (Step(..))
+import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Data.Maybe (Maybe(..), maybe)
+import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (LambdaF(..))
+import Machine.Closure (Closure(..), closure)
+import Machine.Context (class Context, binds, bound)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
-data Closure f var cat ctx =
-  Closure (f (LambdaF var cat)) (ctx (Maybe (Closure f var cat ctx)))
+-- | The transitions of a Machine are defined by the Category over which the Lambdas abstract
+class Transition f var cat ctx halt m where
+  transition :: cat (f (LambdaF var cat))
+             -> Maybe (Machine f var cat ctx)
+             -> m (Step (Machine f var cat ctx) (Halt var halt))
 
+-- | A Machine is a non-empty Stack of Closures
 type Machine f var cat ctx = Cofree Maybe (Closure f var cat ctx)
 
+-- | A Machine Halts either because of a fault in the Lambda calculus or
+-- because a transition results in a halting condition
 data Halt var halt =
     ContextFault var
   | StackFault
   | Halt halt
 
-class Morph f var cat ctx halt m where
-  morph :: cat (f (LambdaF var cat))
-        -> ctx (Maybe (Closure f var cat ctx))
-        -> Maybe (Machine f var cat ctx)
-        -> m (Step (Machine f var cat ctx) (Halt var halt))
-
+-- | A Krivine Machine Step
+-- Abs ~ pop, bind, and evaluate the body
+-- App ~ push the argument and evaluate the applied term
+-- Var ~ dereference the variable
+-- Cat ~ evaluate a state transition
 step :: forall f var cat ctx halt m .
         Monad m
-     => Eq var
-     => ComonadStore var ctx
+     => Context var (Closure f var cat ctx) ctx
      => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-     => Morph f var cat ctx halt m
+     => Transition f var cat ctx halt m
      => Machine f var cat ctx -> m (Step (Machine f var cat ctx) (Halt var halt))
 step machine = do
-  let Closure term context = head machine
+  let Closure (term /\ context) = head machine
   case project term of
     Abs var body ->
       case tail machine of
-          Nothing -> pure $ Done StackFault
-          Just stack -> do
-             let varBind ctx = if pos ctx == var
-                                 then Just (head stack)
-                                 else peek (pos ctx) ctx
-             pure $ Loop $ (Closure body (extend varBind context)) :< tail stack 
+        Nothing -> pure $ Done StackFault
+        Just stack -> do
+          pure $ Loop $ (closure body (binds var (head stack) context)) :< tail stack 
     App f g ->
-      pure $ Loop $ (Closure f context) :< Just ((Closure g context) :< tail machine)
+      pure $ Loop $ (closure f context) :< Just ((closure g context) :< tail machine)
     Var var -> do
       let continue closure = closure :< tail machine
-      pure $ maybe (Done $ ContextFault var) (Loop <<< continue) (peek var context)
-    Cat c -> morph c context (tail machine)
+      pure $ maybe (Done $ ContextFault var) (Loop <<< continue) (bound var context)
+    Cat c -> transition c (tail machine)
+
+-- | Run a Krivine machine until a Halting condition is reached
+runUnbounded :: forall f var cat ctx halt m .
+                MonadRec m
+             => Context var (Closure f var cat ctx) ctx
+             => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+             => Transition f var cat ctx halt m
+             => Machine f var cat ctx -> m (Halt var halt)
+runUnbounded = tailRecM step
+
 

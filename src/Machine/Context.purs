@@ -1,58 +1,32 @@
 module Machine.Context where
 
-import Control.Alt (class Functor, (<$>))
-import Control.Category ((<<<))
-import Control.Comonad (class Comonad, class Extend, extract)
-import Control.Comonad.Store (class ComonadStore)
-import Control.Comonad.Trans.Class (class ComonadTrans)
-import Control.Extend ((<<=))
-import Data.Function (($))
-import Data.Function.Memoize (class Tabulate, memoize)
-import Data.Identity (Identity(..))
-import Data.Newtype (class Newtype)
-import Data.Tuple.Nested (type (/\), (/\))
+import Prelude
 
-type Context s = ContextT s Identity
+import Control.Comonad.Store.Class (peek, pos)
+import Control.Comonad.Store.Memoized (MemoizedStore, memoizedStore)
+import Control.Extend (extend)
+import Data.Function.Memoize (class Tabulate)
+import Data.Map (Map)
+import Data.Map as Map
+import Data.Maybe (Maybe(..))
 
-runContext :: forall s a. Context s a -> (s -> a) /\ s 
-runContext (ContextT (Identity f /\ s)) = f /\ s
+class Context idx obj ctx | ctx -> idx, ctx -> obj where
+  empty :: ctx
+  binds :: idx -> obj -> ctx -> ctx
+  bound :: idx -> ctx -> (Maybe obj)
 
-context :: forall s a. (s -> a) -> s -> Context s a
-context f s = ContextT (Identity f /\ s)
-
-newtype ContextT s w a = ContextT ((w (s -> a)) /\ s)
-
-runContextT :: forall s w a . ContextT s w a -> ((w (s -> a)) /\ s)
-runContextT (ContextT ctx) = ctx
- 
-derive instance Newtype (ContextT s w a) _
+instance Ord idx => Context idx obj (Map idx obj) where
+  empty = Map.empty
+  binds idx obj ctx = Map.insert idx obj ctx
+  bound idx ctx = Map.lookup idx ctx
 
 instance
-  ( Tabulate s
-  , Functor w
-  ) => Functor (ContextT s w) where
-  map f (ContextT (w /\ s)) = ContextT (((\g -> memoize (f <<< g)) <$> w) /\ s)
-
-instance
-  ( Tabulate s
-  , Extend w
-  ) => Extend (ContextT s w) where
-  extend f (ContextT (w /\ s)) = ContextT (((\w' s' -> f (ContextT (w' /\ s'))) <<= w) /\ s)
-
-instance
-  ( Tabulate s
-  , Comonad w
-  ) => Comonad (ContextT s w) where
-  extract (ContextT (w /\ a)) = extract w a
-
-instance ComonadTrans (ContextT s) where
-  lower (ContextT (w /\ s)) = (_ $ s) <$> w
-
-instance
-  ( Tabulate s
-  , Comonad w
-  ) => ComonadStore s (ContextT s w) where
-  pos (ContextT (_ /\ s)) = s
-  peek s (ContextT (f /\ _)) = extract f s
+  ( Semiring idx
+  , Eq idx
+  , Tabulate idx
+  ) => Context idx obj (MemoizedStore idx (Maybe obj)) where
+  empty = memoizedStore (const Nothing) zero
+  binds idx obj ctx = extend (\cur -> if pos cur == idx then Just obj else peek (pos cur) cur) ctx 
+  bound idx ctx = peek idx ctx
 
 
