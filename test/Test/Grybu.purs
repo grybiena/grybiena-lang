@@ -47,6 +47,8 @@ grybuTests = runTest do
     testInferType "1.0" "Number"
 
     testInferType "intPlus 1 1" "Int"
+    testInferType "intPlus 1" "Int -> Int"
+    testInferType "intPlus" "Int -> Int -> Int"
 
     testInferType "1 :: Int" "Int"
     testInferType "\\a -> a :: Int" "Int -> Int"
