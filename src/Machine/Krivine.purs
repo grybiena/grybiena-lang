@@ -17,11 +17,36 @@ import Machine.Closure (Closure(..), closure)
 import Machine.Context (class Context, binds, bound)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
+
+-- | Evaluates of the Category `cat` over the Lambda calculus
+class Applicative m <= Evaluate f var cat m where
+  -- | thunk elimination
+  thunk :: cat (f (LambdaF var cat)) -> m (cat Void) 
+  -- | functor application
+  functor :: cat (f (LambdaF var cat)) -> cat Void -> m (f (LambdaF var cat)) 
+
+
 -- | The transitions of a Machine are defined by the Category over which the Lambdas abstract
 class Transition f var cat ctx halt m where
   transition :: cat (f (LambdaF var cat))
              -> Maybe (Machine f var cat ctx)
              -> m (Step (Machine f var cat ctx) (Halt var halt))
+
+instance
+  ( MonadRec m
+  , Context var (Closure f var cat ctx) ctx
+  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
+  , Evaluate f var cat m
+  ) => Transition f var cat ctx (cat Void) m where
+  transition o Nothing = (Done <<< Halt) <$> thunk o
+  transition f (Just stack) = do
+     let arg@(Closure (_ /\ ctx)) = head stack
+     res <- evalUnbounded arg
+     case res of
+       Halt h -> do
+         aft <- functor f h
+         pure $ Loop ((closure aft ctx) :< tail stack)
+       err -> pure $ Done err
 
 -- | A Machine is a non-empty Stack of Closures
 type Machine f var cat ctx = Cofree Maybe (Closure f var cat ctx)

@@ -6,7 +6,6 @@ import Control.Alt ((<|>))
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Lazy (defer)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
-import Control.Monad.Rec.Class (class MonadRec, Step(..))
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate, (..))
 import Data.Eq (class Eq1)
@@ -14,19 +13,15 @@ import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.Map (Map)
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
-import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, prettyVar, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
-import Machine.Closure (Closure(..), closure)
-import Machine.Context (class Context)
-import Machine.Krivine (class Transition, Halt(..), Machine, evalUnbounded)
+import Machine.Krivine (class Evaluate)
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
@@ -43,6 +38,8 @@ data TT a =
   | Star Int
 
   | TypeAnnotation a Term
+
+  | Error String
 
   | Int Int
   | TypeInt
@@ -63,6 +60,7 @@ instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
+  map _ (Error e) = Error e
   map _ (Int i) = Int i
   map _ TypeInt = TypeInt
   map _ (Number n) = Number n
@@ -105,6 +103,7 @@ instance PrettyLambda Var TT where
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
   prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
+  prettyCat (Error e) = text "Error" <+> text e
   prettyCat (Int i) = text $ show i
   prettyCat TypeInt = text "Int"
   prettyCat (Number i) = text $ show i
@@ -115,7 +114,7 @@ parseValue :: forall m . Monad m => ParserT String m Term
 parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
 
 parseValueAtom :: forall m . Monad m => ParserT String m Term
-parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative intPlus <|> (parens parseValue)
+parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative intPlus <|> parseNative numPlus <|> (parens parseValue)
 
 parseNumeric :: forall m . Monad m => ParserT String m Term
 parseNumeric = (try parseNumber) <|> parseInt
@@ -235,35 +234,35 @@ instance
     (t' :: Cofree (LambdaF Var TT) Term) <- v
     _ <- unify (t :: Term) (head t' :: Term)
     pure (t :< tail t')
+  inference (Error e) = pure (cat (Error e) :< Cat (Error e))
   inference (Int i) = pure $ (cat TypeInt :< Cat (Int i))
   inference TypeInt = pure $ (cat (Star 1) :< Cat TypeInt)
   inference (Number n) = pure $ cat TypeNumber :< Cat (Number n)
   inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
   inference (Native (Impl n)) = pure $ n.nativeType :< Cat (Native (Impl n))
 
-data GHalt =
-    MachineError String
-  | PureInt Int
-  | PureNumber Number
 
-derive instance Generic GHalt _
-instance Show GHalt where
-  show = genericShow
-instance Eq GHalt where
-  eq = genericEq
 
-instance
-  ( MonadRec m
-  , Context Var (Closure Mu Var TT Map) Map
-  ) => Transition Mu Var TT Map GHalt m where
-  transition (Int i) _ = pure $ Done $ Halt (PureInt i)
-  transition (Number n) _ = pure $ Done $ Halt (PureNumber n)
-  transition (Native (Impl { nativeTerm, nativeType })) Nothing = pure $ Done $ Halt $ nativeTerm (wrap nativeType)
-  transition (Native native) (Just stack) = do
-    let arg@(Closure (_ /\ ctx)) = head stack
-    arg' <- evalUnbounded arg
-    applyNative native arg' (\ret -> closure (cat (Native ret)) ctx :< tail stack)
-  transition e _ = pure $ Done $ Halt $ MachineError $ show e 
+
+instance Applicative m => Evaluate Mu Var TT m where
+  thunk (Int i) = pure $ Int i
+  thunk (Number n) = pure $ Number n
+  thunk (Native native) = pure $ liftPrimitives native
+  thunk e = pure $ Error $ "Machine terminated on a non-thunk object: " <> show (const unit <$> e)
+
+  functor (Native (Impl { nativeName, nativeTerm, nativeType })) arg =
+    case project nativeType of
+      App (In (App (In (Cat Arrow)) (In (Cat argTy)))) ret -> 
+        case unwrap argTy arg of
+          Just i ->
+            pure $ cat $ Native $ Impl { nativeName: nativeName <> " " <> prettyPrint (cat (absurd <$> arg :: TT Term))
+                                       , nativeTerm: nativeTerm i
+                                       , nativeType: ret
+                                       }
+          Nothing -> pure $ cat $ Error $ "Cannot apply `" <> nativeName <> " :: " <> prettyPrint nativeType 
+                                      <> "` to " <> show arg
+      _ -> pure $ cat $ Error $ "Cannot apply `" <> nativeName <> " :: " <> prettyPrint nativeType
+  functor e _ = pure $ cat $ Error $ "Machine applied non-functor object: " <> show (const unit <$> e)
 
 newtype Native = Impl { nativeName :: String, nativeType :: Term, nativeTerm :: forall a. a }
 
@@ -271,40 +270,34 @@ instance Eq Native where
   eq (Impl a) (Impl b) = a.nativeName == b.nativeName && a.nativeType == b.nativeType
 
 instance Show Native where
-  show (Impl { nativeName, nativeType }) = "Native { nativeName: " <> nativeName <> ", nativeType: " <> prettyPrint nativeType <> "}" 
+  show (Impl { nativeName, nativeType }) = "(" <> nativeName <> " :: " <> prettyPrint nativeType <> ")"
 
-wrap :: Term -> (forall a . a) -> GHalt
-wrap (In (Cat TypeInt)) a = PureInt a
-wrap (In (Cat TypeNumber)) a = PureNumber a
-wrap e _ = MachineError $ "Cannot wrap: " <> prettyPrint e
+liftPrimitives :: Native -> TT Void
+liftPrimitives native@(Impl { nativeType, nativeTerm }) =
+  case project nativeType of
+    Cat TypeInt -> Int $ unsafeCoerce nativeTerm
+    Cat TypeNumber -> Number $ unsafeCoerce nativeTerm
+    _ -> Native native
 
-applyNative :: forall m. Applicative m => Native -> Halt Var GHalt -> (Native -> Machine Mu Var TT Map) -> m (Step (Machine Mu Var TT Map) (Halt Var GHalt)) 
-applyNative _ (Halt (MachineError e)) _ = pure $ Done $ Halt (MachineError e)
-applyNative (Impl { nativeName, nativeTerm, nativeType }) (Halt (PureInt i)) f =
-  case project nativeType of
-    App (In (App (In (Cat Arrow)) (In (Cat TypeInt)))) ret -> 
-      pure $ Loop $ f (Impl { nativeName: nativeName <> "(" <> show i <> ")"
-                            , nativeTerm: nativeTerm i
-                            , nativeType: ret
-                            })
-    _ -> pure $ Done $ Halt (MachineError $ "Cannot apply `" <> nativeName <> " :: " <> prettyPrint nativeType <> "` to Int")
-applyNative (Impl { nativeName, nativeTerm, nativeType }) (Halt (PureNumber i)) f =
-  case project nativeType of
-    App (In (App (In (Cat Arrow)) (In (Cat TypeNumber)))) ret -> 
-      pure $ Loop $ f (Impl { nativeName: nativeName <> "(" <> show i <> ")"
-                            , nativeTerm: nativeTerm i
-                            , nativeType: ret
-                            })
-    _ -> pure $ Done $ Halt (MachineError $ "Cannot apply `" <> nativeName <> " :: " <> prettyPrint nativeType <> "` to Number")
-applyNative _ e _ = pure $ Done e
+unwrap :: forall x. TT x -> TT Void -> Maybe (forall a . a) 
+unwrap TypeInt (Int i) = Just $ unsafeCoerce i
+unwrap TypeNumber (Number n) = Just $ unsafeCoerce n
+unwrap _ (Native (Impl { nativeTerm })) = Just nativeTerm
+unwrap _ _ = Nothing
 
 intPlus :: Native
 intPlus = Impl
   { nativeName: "intPlus"
   , nativeType: (arrow (cat TypeInt) (arrow (cat TypeInt) (cat (TypeInt))))
-  , nativeTerm: unsafeCoerce (\(a :: Int) (b :: Int) -> \u -> u (a + b))
+  , nativeTerm: unsafeCoerce (\(a :: Int) (b :: Int) -> a + b)
   }
 
+numPlus :: Native
+numPlus = Impl
+  { nativeName: "numPlus"
+  , nativeType: (arrow (cat TypeNumber) (arrow (cat TypeNumber) (cat (TypeNumber))))
+  , nativeTerm: unsafeCoerce (\(a :: Number) (b :: Number) -> a + b)
+  }
 
 int :: Int -> Native
 int i = Impl
@@ -312,5 +305,6 @@ int i = Impl
   , nativeType: cat TypeInt
   , nativeTerm: unsafeCoerce i 
   }
+
 
 

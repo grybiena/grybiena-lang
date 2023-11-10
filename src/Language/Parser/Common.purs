@@ -16,7 +16,7 @@ type Parser a = IndentParser String a
 tokenParser :: GenTokenParser String Identity 
 tokenParser = makeTokenParser (let LanguageDef def = haskellStyle
                                 in LanguageDef (def { reservedOpNames = [ "=", "::", ",", ".", "\\", "->"]
-                                , reservedNames = [ "forall", "type", "data", "String", "Int", "Number", "_", "intPlus"]
+                                , reservedNames = [ "forall", "type", "data", "String", "Int", "Number", "_", "intPlus", "numPlus"]
                                                     }))
 
 integer :: forall m . Monad m => ParserT String m Int

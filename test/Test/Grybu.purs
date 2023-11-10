@@ -10,7 +10,7 @@ import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Language.Grybu (GHalt(..), Term, UnificationError(..), Var(..), parseType, parseValue)
+import Language.Grybu (TT(..), Term, UnificationError(..), Var(..), parseType, parseValue)
 import Language.Lambda.Calculus (universe)
 import Language.Lambda.Inference (runInference)
 import Language.Lambda.Unification (rewrite, runUnification, unify)
@@ -72,10 +72,17 @@ grybuTests = runTest do
     testInferKind "Number" "*"
 
 
-    testRun "1" (PureInt 1)
-    testRun "1.0" (PureNumber 1.0)
-    testRun "intPlus 1 1" (PureInt 2)
-    testRun "intPlus (intPlus 1 1) (intPlus 1 1)" (PureInt 4)
+    testRun "1" (Int 1)
+    testRun "1.0" (Number 1.0)
+    testRun "intPlus 1 1" (Int 2)
+    testRun "intPlus (intPlus 1 1) (intPlus 1 1)" (Int 4)
+
+    testRun "numPlus 1.0 1.0" (Number 2.0)
+
+    testRun "numPlus (numPlus 99.9 0.001) (numPlus 0.0004 0.0005)" (Number 99.90190000000001)
+
+--    testRun "intPlus (1 1)" (Int 4)
+
 
 
 testInferType :: String -> String -> TestSuite
@@ -90,7 +97,7 @@ testInferType v t = test ("(" <> v <> ") :: " <> t) do
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
             Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> show err) false
 
-testRun :: String -> GHalt -> TestSuite
+testRun :: String -> TT Void -> TestSuite
 testRun v h = test ("run (" <> v <> ")") do
   case termParser v of
     Left err -> Assert.assert ("parse error: " <> show err) false

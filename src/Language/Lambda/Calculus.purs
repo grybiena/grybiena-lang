@@ -132,6 +132,9 @@ class PrettyVar i where
 instance PrettyVar String where
   prettyVar = text
 
+instance PrettyVar Void where
+  prettyVar = absurd
+
 class PrettyVar var <= PrettyLambda var cat where
   prettyAbs :: var -> Lambda var cat -> DOC
   prettyApp :: Lambda var cat -> Lambda var cat -> DOC
