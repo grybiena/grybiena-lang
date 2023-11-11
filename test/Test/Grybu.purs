@@ -10,7 +10,7 @@ import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Language.Grybu (TT(..), Term, UnificationError(..), Var(..), parseType, parseValue)
+import Language.Grybu (TT(..), Term, UnificationError(..), Var(..), int, num, parseType, parseValue)
 import Language.Lambda.Calculus (universe)
 import Language.Lambda.Inference (runInference)
 import Language.Lambda.Unification (rewrite, runUnification, unify)
@@ -72,16 +72,16 @@ grybuTests = runTest do
     testInferKind "Number" "*"
 
 
-    testRun "1" (Int 1)
-    testRun "1.0" (Number 1.0)
-    testRun "intPlus 1 1" (Int 2)
-    testRun "intPlus (intPlus 1 1) (intPlus 1 1)" (Int 4)
+    testRun "1" (Native $ int 1)
+    testRun "1.0" (Native $ num 1.0)
+    testRun "intPlus 1 1" (Native $ int 2)
+    testRun "intPlus (intPlus 1 1) (intPlus 1 1)" (Native $ int 4)
 
-    testRun "numPlus 1.0 1.0" (Number 2.0)
+    testRun "numPlus 1.0 1.0" (Native $ num 2.0)
 
-    testRun "numPlus (numPlus 99.9 0.001) (numPlus 0.0004 0.0005)" (Number 99.90190000000001)
+    testRun "numPlus (numPlus 99.9 0.001) (numPlus 0.0004 0.0005)" (Native $ num 99.90190000000001)
 
---    testRun "intPlus (1 1)" (Int 4)
+--    testRun "intPlus (1 1)" (Native $ int 4)
 
 
 

@@ -13,6 +13,7 @@ import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
+import Data.Identity (Identity)
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
@@ -28,6 +29,7 @@ import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (pretty, prettyPrint)
+import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
 type Term = Lambda Var TT
@@ -36,18 +38,13 @@ type Term = Lambda Var TT
 data TT a =
     Arrow 
   | Star Int
-
   | TypeAnnotation a Term
+  | Bottom String
 
-  | Error String
-
-  | Int Int
   | TypeInt
-
-  | Number Number
   | TypeNumber
 
-  | Native Native
+  | Native (Native Identity)
 
 derive instance Generic (TT a) _
 
@@ -60,10 +57,8 @@ instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
-  map _ (Error e) = Error e
-  map _ (Int i) = Int i
+  map _ (Bottom e) = Bottom e
   map _ TypeInt = TypeInt
-  map _ (Number n) = Number n
   map _ TypeNumber = TypeNumber
   map _ (Native n) = Native n
 
@@ -103,30 +98,30 @@ instance PrettyLambda Var TT where
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
   prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
-  prettyCat (Error e) = text "Error" <+> text e
-  prettyCat (Int i) = text $ show i
+  prettyCat (Bottom e) = text "Bottom" <+> text e
   prettyCat TypeInt = text "Int"
-  prettyCat (Number i) = text $ show i
   prettyCat TypeNumber = text "Number"
-  prettyCat (Native (Impl { nativeName })) = text nativeName
+  prettyCat (Native (Pure { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
+  prettyCat (Native (Effect { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
+
 
 parseValue :: forall m . Monad m => ParserT String m Term
 parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
 
 parseValueAtom :: forall m . Monad m => ParserT String m Term
-parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative intPlus <|> parseNative numPlus <|> (parens parseValue)
+parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> (parens parseValue)
 
 parseNumeric :: forall m . Monad m => ParserT String m Term
 parseNumeric = (try parseNumber) <|> parseInt
 
 parseInt :: forall m . Monad m => ParserT String m Term
-parseInt = cat <<< Int <$> integer
+parseInt = cat <<< Native <<< native <$> integer
  
-parseNative :: forall m . Monad m => Native -> ParserT String m Term
-parseNative native@(Impl { nativeName }) = reserved nativeName *> pure (cat (Native native))
+parseNative :: forall m . Monad m => String -> Native Identity -> ParserT String m Term
+parseNative name n = reserved name *> pure (cat (Native n))
  
 parseNumber :: forall m . Monad m => ParserT String m Term
-parseNumber = cat <<< Number <$> number
+parseNumber = cat <<< Native <<< num <$> number
 
 parseTypeAnnotation :: forall m . Monad m => Term -> ParserT String m Term
 parseTypeAnnotation v = do
@@ -234,77 +229,76 @@ instance
     (t' :: Cofree (LambdaF Var TT) Term) <- v
     _ <- unify (t :: Term) (head t' :: Term)
     pure (t :< tail t')
-  inference (Error e) = pure (cat (Error e) :< Cat (Error e))
-  inference (Int i) = pure $ (cat TypeInt :< Cat (Int i))
+  inference (Bottom e) = pure (cat (Bottom e) :< Cat (Bottom e))
   inference TypeInt = pure $ (cat (Star 1) :< Cat TypeInt)
-  inference (Number n) = pure $ cat TypeNumber :< Cat (Number n)
   inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
-  inference (Native (Impl n)) = pure $ n.nativeType :< Cat (Native (Impl n))
-
-
-
+  inference (Native (Pure n)) = pure $ n.nativeType :< Cat (Native (Pure n))
+  inference (Native (Effect n)) = pure $ n.nativeType :< Cat (Native (Effect n))
 
 instance Applicative m => Evaluate Mu Var TT m where
-  thunk (Int i) = pure $ Int i
-  thunk (Number n) = pure $ Number n
-  thunk (Native native) = pure $ liftPrimitives native
-  thunk e = pure $ Error $ "Machine terminated on a non-thunk object: " <> show (const unit <$> e)
+  thunk (Native n) = pure $ Native n
+  thunk e = pure $ Bottom $ "Machine terminated on a non-thunk object: " <> show (const unit <$> e)
 
-  functor (Native (Impl { nativeName, nativeTerm, nativeType })) arg =
+  functor (Native (Pure { nativeTerm, nativeType })) arg =
     case project nativeType of
       App (In (App (In (Cat Arrow)) (In (Cat argTy)))) ret -> 
         case unwrap argTy arg of
           Just i ->
-            pure $ cat $ Native $ Impl { nativeName: nativeName <> " " <> prettyPrint (cat (absurd <$> arg :: TT Term))
-                                       , nativeTerm: nativeTerm i
+            pure $ cat $ Native $ Pure { nativeTerm: nativeTerm i
                                        , nativeType: ret
                                        }
-          Nothing -> pure $ cat $ Error $ "Cannot apply `" <> nativeName <> " :: " <> prettyPrint nativeType 
+          Nothing -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType 
                                       <> "` to " <> show arg
-      _ -> pure $ cat $ Error $ "Cannot apply `" <> nativeName <> " :: " <> prettyPrint nativeType
-  functor e _ = pure $ cat $ Error $ "Machine applied non-functor object: " <> show (const unit <$> e)
+      _ -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType
+  functor e _ = pure $ cat $ Bottom $ "Machine applied non-functor object: " <> show (const unit <$> e)
 
-newtype Native = Impl { nativeName :: String, nativeType :: Term, nativeTerm :: forall a. a }
+data Native m =
+    Pure { nativeType :: Term, nativeTerm :: forall a. a }
+  | Effect { nativeType :: Term, nativeTerm :: m (forall a. a) }
 
-instance Eq Native where
-  eq (Impl a) (Impl b) = a.nativeName == b.nativeName && a.nativeType == b.nativeType
 
-instance Show Native where
-  show (Impl { nativeName, nativeType }) = "(" <> nativeName <> " :: " <> prettyPrint nativeType <> ")"
+instance Eq (Native m) where
+  eq (Pure a) (Pure b) = a.nativeType == b.nativeType && (a.nativeTerm :: String) == b.nativeTerm
+  eq _ _ = false
 
-liftPrimitives :: Native -> TT Void
-liftPrimitives native@(Impl { nativeType, nativeTerm }) =
-  case project nativeType of
-    Cat TypeInt -> Int $ unsafeCoerce nativeTerm
-    Cat TypeNumber -> Number $ unsafeCoerce nativeTerm
-    _ -> Native native
+instance Show (Native m) where
+  show (Pure { nativeType }) = "(_ :: " <> prettyPrint nativeType <> ")"
+  show (Effect { nativeType }) = "(_ :: " <> prettyPrint nativeType <> ")"
 
 unwrap :: forall x. TT x -> TT Void -> Maybe (forall a . a) 
-unwrap TypeInt (Int i) = Just $ unsafeCoerce i
-unwrap TypeNumber (Number n) = Just $ unsafeCoerce n
-unwrap _ (Native (Impl { nativeTerm })) = Just nativeTerm
+unwrap _ (Native (Pure { nativeTerm })) = Just nativeTerm
 unwrap _ _ = Nothing
 
-intPlus :: Native
-intPlus = Impl
-  { nativeName: "intPlus"
-  , nativeType: (arrow (cat TypeInt) (arrow (cat TypeInt) (cat (TypeInt))))
-  , nativeTerm: unsafeCoerce (\(a :: Int) (b :: Int) -> a + b)
+intPlus :: forall m . Native m
+intPlus = native (\(a :: Int) (b :: Int) -> a + b)
+
+numPlus :: forall m. Native m
+numPlus = native (\(a :: Number) (b :: Number) -> a + b)
+
+int :: forall m . Int -> Native m
+int i = native i
+
+num :: forall m . Number -> Native m
+num i = native i
+
+class Reifies :: forall k. k -> Constraint
+class Reifies s where
+  reify :: Proxy s -> Term
+
+
+native :: forall m t . Reifies t => t -> Native m
+native term = Pure
+  { nativeType: reify (Proxy :: Proxy t)
+  , nativeTerm: unsafeCoerce term
   }
 
-numPlus :: Native
-numPlus = Impl
-  { nativeName: "numPlus"
-  , nativeType: (arrow (cat TypeNumber) (arrow (cat TypeNumber) (cat (TypeNumber))))
-  , nativeTerm: unsafeCoerce (\(a :: Number) (b :: Number) -> a + b)
-  }
 
-int :: Int -> Native
-int i = Impl
-  { nativeName: show i
-  , nativeType: cat TypeInt
-  , nativeTerm: unsafeCoerce i 
-  }
+instance Reifies Int where
+  reify _ = cat TypeInt
 
+instance Reifies Number where
+  reify _ = cat TypeNumber
 
+instance (Reifies a, Reifies b) => Reifies (a -> b) where
+  reify _ = arrow (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b)) 
 
