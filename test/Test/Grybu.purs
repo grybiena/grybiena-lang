@@ -55,6 +55,9 @@ grybuTests = runTest do
 
     testInferType "1 :: Int :: *" "Int" 
 
+    testInferType "pureEffect" "a -> Effect a"
+    testInferType "bindEffect" "Effect a -> (a -> Effect b) -> Effect b"
+
 
     testInferKind "forall a . a" "k -> k"
     testInferKind "forall a b. a b" "(k -> j) -> (k -> j)" 

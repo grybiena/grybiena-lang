@@ -21,7 +21,7 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, prettyVar, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, unificationError, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, fresh, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
 import Machine.Krivine (class Evaluate)
 import Matryoshka.Class.Recursive (project)
@@ -37,15 +37,18 @@ type Term m = Lambda Var (TT m)
 
 
 data TT m a =
-    Arrow 
-  | Star Int
-  | TypeAnnotation a (Term m)
+  -- Types
+    Star Int
+  | Arrow 
   | Bottom String
-
   | TypeInt
   | TypeNumber
   | TypeEffect
 
+  -- Values
+  | PureEffect
+  | BindEffect
+  | TypeAnnotation a (Term m)
   | Native (Native m)
 
 derive instance Generic (TT m a) _
@@ -63,6 +66,8 @@ instance Functor (TT m) where
   map _ TypeInt = TypeInt
   map _ TypeNumber = TypeNumber
   map _ TypeEffect = TypeEffect
+  map _ PureEffect = PureEffect
+  map _ BindEffect = BindEffect
   map _ (Native n) = Native n
 
 
@@ -105,6 +110,9 @@ instance PrettyLambda Var (TT m) where
   prettyCat TypeInt = text "Int"
   prettyCat TypeNumber = text "Number"
   prettyCat TypeEffect = text "Effect" 
+
+  prettyCat BindEffect = text "bindEffect"
+  prettyCat PureEffect = text "pureEffect"
   prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
 
 
@@ -112,13 +120,20 @@ parseValue :: forall m n. Monad m => ParserT String m (Term n)
 parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
 
 parseValueAtom :: forall m n. Monad m => ParserT String m (Term n)
-parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> (parens parseValue)
+parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> parsePureEffect <|> parseBindEffect <|> (parens parseValue)
 
 parseNumeric :: forall m n. Monad m => ParserT String m (Term n)
 parseNumeric = (try parseNumber) <|> parseInt
 
 parseInt :: forall m n. Monad m => ParserT String m (Term n)
 parseInt = cat <<< Native <<< native <$> integer
+ 
+parsePureEffect :: forall m n. Monad m => ParserT String m (Term n)
+parsePureEffect = reserved "pureEffect" *> pure (cat PureEffect)
+
+parseBindEffect :: forall m n. Monad m => ParserT String m (Term n)
+parseBindEffect = reserved "bindEffect" *> pure (cat BindEffect)
+ 
  
 parseNative :: forall m n. Monad m => String -> Native n -> ParserT String m (Term n)
 parseNative name n = reserved name *> pure (cat (Native n))
@@ -144,14 +159,17 @@ parseType :: forall m n. Monad m => ParserT String m (Term n)
 parseType = buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom 
 
 parseTypeAtom :: forall m n. Monad m => ParserT String m (Term n)
-parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> (parens parseType)
+parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType)
 
 parseTypeInt :: forall m n . Monad m => ParserT String m (Term n)
 parseTypeInt = reserved "Int" *> pure (cat TypeInt)
  
 parseTypeNumber :: forall m n . Monad m => ParserT String m (Term n)
 parseTypeNumber = reserved "Number" *> pure (cat TypeNumber)
- 
+  
+parseTypeEffect :: forall m n . Monad m => ParserT String m (Term n)
+parseTypeEffect = reserved "Effect" *> pure (cat TypeEffect)
+
 
 parseTypeArrow :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
 parseTypeArrow a = do
@@ -218,12 +236,14 @@ instance
   unify a (TypeAnnotation b k) = flip TypeAnnotation k <$> unify (cat a) b
   unify TypeInt TypeInt = pure TypeInt
   unify TypeNumber TypeNumber = pure TypeNumber
+  unify TypeEffect TypeEffect = pure TypeEffect
   unify a b = throwError $ unificationError (cat a) (cat b)
 
 
 instance
   ( Monad m
   , Unification (Term n) m
+  , MonadState (TypingContext Var Mu Var (TT n)) m
   ) => Inference Var (TT n) (Term n) m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
@@ -235,6 +255,13 @@ instance
   inference TypeInt = pure $ (cat (Star 1) :< Cat TypeInt)
   inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
   inference TypeEffect = pure $ arrow (cat (Star 1)) (cat (Star 1)) :< Cat TypeEffect
+  inference PureEffect = do
+     a <- fresh
+     pure $ arrow a (app (cat TypeEffect) a) :< Cat PureEffect
+  inference BindEffect = do
+     a <- fresh
+     b <- fresh
+     pure $ arrow (app (cat TypeEffect) a) (arrow (arrow a (app (cat TypeEffect) b)) (app (cat TypeEffect) b)) :< Cat BindEffect
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
 instance Applicative m => Evaluate Mu Var (TT m) m where
@@ -293,6 +320,7 @@ pureLogInt = native prim
   where
     prim :: Int -> m Int
     prim a = liftEffect (log (show a)) *> pure 0
+
 
 
 pureEffectInt :: forall m. Reifies m m => Applicative m => Native m
