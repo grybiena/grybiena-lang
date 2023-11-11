@@ -26,42 +26,38 @@ class Applicative m <= Evaluate f var cat m where
   functor :: cat (f (LambdaF var cat)) -> cat Void -> m (f (LambdaF var cat)) 
 
 
--- | The transitions of a Machine are defined by the Category over which the Lambdas abstract
-class Transition f var cat ctx halt m where
-  transition :: cat (f (LambdaF var cat))
-             -> Maybe (Machine f var cat ctx)
-             -> m (Step (Machine f var cat ctx) (Halt var halt))
-
-instance
-  ( MonadRec m
-  , Context var (Closure f var cat ctx) ctx
-  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Evaluate f var cat m
-  ) => Transition f var cat ctx (cat Void) m where
-  transition o Nothing = (Done <<< Halt) <$> thunk o
-  transition f (Just stack) = do
-     let arg@(Closure (_ /\ ctx)) = head stack
-     res <- evalUnbounded arg
-     case res of
-       Halt h -> do
-         aft <- functor f h
-         pure $ Loop ((closure aft ctx) :< tail stack)
-       err -> pure $ Done err
+transition :: forall m f var cat ctx.
+              MonadRec m
+           => Context var (Closure f var cat ctx) ctx
+           => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+           => Evaluate f var cat m
+           =>  cat (f (LambdaF var cat))
+           -> Maybe (Machine f var cat ctx)
+           -> m (Step (Machine f var cat ctx) (Halt var cat))
+transition o Nothing = (Done <<< Halt) <$> thunk o
+transition f (Just stack) = do
+   let arg@(Closure (_ /\ ctx)) = head stack
+   res <- evalUnbounded arg
+   case res of
+     Halt h -> do
+       aft <- functor f h
+       pure $ Loop ((closure aft ctx) :< tail stack)
+     err -> pure $ Done err
 
 -- | A Machine is a non-empty Stack of Closures
 type Machine f var cat ctx = Cofree Maybe (Closure f var cat ctx)
 
 -- | A Machine Halts either because of a fault in the Lambda calculus or
 -- because a transition results in a halting condition
-data Halt var halt =
+data Halt var cat =
     ContextFault var
   | StackFault
-  | Halt halt
+  | Halt (cat Void)
 
-derive instance Generic (Halt var halt) _
-instance (Show var, Show halt) => Show (Halt var halt) where
+derive instance Generic (Halt var cat) _
+instance (Show var, Show (cat Void)) => Show (Halt var cat) where
   show = genericShow
-instance (Eq var, Eq halt) => Eq (Halt var halt) where
+instance (Eq var, Eq (cat Void)) => Eq (Halt var cat) where
   eq = genericEq
 
 -- | A Krivine Machine Step
@@ -69,12 +65,12 @@ instance (Eq var, Eq halt) => Eq (Halt var halt) where
 -- App ~ push the argument and evaluate the applied term
 -- Var ~ dereference the variable
 -- Cat ~ evaluate a state transition
-step :: forall f var cat ctx halt m .
-        Monad m
+step :: forall f var cat ctx m .
+        MonadRec m
      => Context var (Closure f var cat ctx) ctx
      => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-     => Transition f var cat ctx halt m
-     => Machine f var cat ctx -> m (Step (Machine f var cat ctx) (Halt var halt))
+     => Evaluate f var cat m
+     => Machine f var cat ctx -> m (Step (Machine f var cat ctx) (Halt var cat))
 step machine = do
   let Closure (term /\ context) = head machine
   case project term of
@@ -91,20 +87,20 @@ step machine = do
     Cat c -> transition c (tail machine)
 
 -- | Run a Krivine machine until a Halting condition is reached
-runUnbounded :: forall f var cat ctx halt m .
+runUnbounded :: forall f var cat ctx m .
                 MonadRec m
              => Context var (Closure f var cat ctx) ctx
              => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-             => Transition f var cat ctx halt m
-             => Machine f var cat ctx -> m (Halt var halt)
+             => Evaluate f var cat m
+             => Machine f var cat ctx -> m (Halt var cat)
 runUnbounded = tailRecM step
 
 
-evalUnbounded :: forall f var cat ctx halt m .
+evalUnbounded :: forall f var cat ctx m .
                  MonadRec m
               => Context var (Closure f var cat ctx) ctx
               => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-              => Transition f var cat ctx halt m
-              => Closure f var cat ctx -> m (Halt var halt)
+              => Evaluate f var cat m
+              => Closure f var cat ctx -> m (Halt var cat)
 evalUnbounded c = runUnbounded (c :< Nothing)
 

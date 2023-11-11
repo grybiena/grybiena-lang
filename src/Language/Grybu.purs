@@ -13,11 +13,12 @@ import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.Identity (Identity)
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
+import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Console (log)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, prettyVar, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, unificationError, unify)
@@ -32,44 +33,46 @@ import Pretty.Printer (pretty, prettyPrint)
 import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
-type Term = Lambda Var TT
+type Term m = Lambda Var (TT m)
 
 
-data TT a =
+data TT m a =
     Arrow 
   | Star Int
-  | TypeAnnotation a Term
+  | TypeAnnotation a (Term m)
   | Bottom String
 
   | TypeInt
   | TypeNumber
+  | TypeEffect
 
-  | Native (Native Identity)
+  | Native (Native m)
 
-derive instance Generic (TT a) _
+derive instance Generic (TT m a) _
 
-instance Show a => Show (TT a) where
+instance Show a => Show (TT m a) where
   show (TypeAnnotation a t) = "TypeAnnotation " <> show a <> " " <> show t
   show e = genericShow e
 
 
-instance Functor TT where
+instance Functor (TT m) where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Bottom e) = Bottom e
   map _ TypeInt = TypeInt
   map _ TypeNumber = TypeNumber
+  map _ TypeEffect = TypeEffect
   map _ (Native n) = Native n
 
 
-instance Eq a => Eq (TT a) where
+instance Eq a => Eq (TT m a) where
   eq = genericEq
 
-instance Eq1 TT where
+instance Eq1 (TT m) where
   eq1 = genericEq
 
-instance Foldable TT where
+instance Foldable (TT m) where
   foldr _ b _ = b
   foldl _ b _ = b
   foldMap _ _ = mempty
@@ -90,7 +93,7 @@ instance PrettyVar Var where
   prettyVar (TypeVar v) = text v
   prettyVar (TermVar v) = text v
 
-instance PrettyLambda Var TT where
+instance PrettyLambda Var (TT m) where
   prettyAbs (TermVar i) a = (text "\\" <> prettyVar i) <+> text "->" <+> pretty a
   prettyAbs (TypeVar i) a = (text "forall" <> prettyVar i) <+> text "." <+> pretty a
   prettyApp (In (App (In (Cat Arrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"
@@ -101,110 +104,109 @@ instance PrettyLambda Var TT where
   prettyCat (Bottom e) = text "Bottom" <+> text e
   prettyCat TypeInt = text "Int"
   prettyCat TypeNumber = text "Number"
-  prettyCat (Native (Pure { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
-  prettyCat (Native (Effect { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
+  prettyCat TypeEffect = text "Effect" 
+  prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
 
 
-parseValue :: forall m . Monad m => ParserT String m Term
+parseValue :: forall m n. Monad m => ParserT String m (Term n)
 parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
 
-parseValueAtom :: forall m . Monad m => ParserT String m Term
+parseValueAtom :: forall m n. Monad m => ParserT String m (Term n)
 parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> (parens parseValue)
 
-parseNumeric :: forall m . Monad m => ParserT String m Term
+parseNumeric :: forall m n. Monad m => ParserT String m (Term n)
 parseNumeric = (try parseNumber) <|> parseInt
 
-parseInt :: forall m . Monad m => ParserT String m Term
+parseInt :: forall m n. Monad m => ParserT String m (Term n)
 parseInt = cat <<< Native <<< native <$> integer
  
-parseNative :: forall m . Monad m => String -> Native Identity -> ParserT String m Term
+parseNative :: forall m n. Monad m => String -> Native n -> ParserT String m (Term n)
 parseNative name n = reserved name *> pure (cat (Native n))
  
-parseNumber :: forall m . Monad m => ParserT String m Term
+parseNumber :: forall m n. Monad m => ParserT String m (Term n)
 parseNumber = cat <<< Native <<< num <$> number
 
-parseTypeAnnotation :: forall m . Monad m => Term -> ParserT String m Term
+parseTypeAnnotation :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
 parseTypeAnnotation v = do
   reservedOp "::"
   t <- parseType
   pure $ cat $ TypeAnnotation v t
  
-parseAbs :: forall m . Monad m => ParserT String m Term
+parseAbs :: forall m n. Monad m => ParserT String m (Term n)
 parseAbs = absMany <$> parsePats <*> parseValue
   where
     parsePats = reservedOp "\\" *> many1Till (TermVar <$> identifier) (reservedOp "->")
 
-parseApp :: forall m . Monad m => Term -> ParserT String m Term
+parseApp :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
 parseApp v = app v <$> parseValueAtom
 
-parseType :: forall m . Monad m => ParserT String m Term
+parseType :: forall m n. Monad m => ParserT String m (Term n)
 parseType = buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom 
 
-parseTypeAtom :: forall m . Monad m => ParserT String m Term
+parseTypeAtom :: forall m n. Monad m => ParserT String m (Term n)
 parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> (parens parseType)
 
-parseTypeInt :: forall m . Monad m => ParserT String m Term
+parseTypeInt :: forall m n . Monad m => ParserT String m (Term n)
 parseTypeInt = reserved "Int" *> pure (cat TypeInt)
  
-parseTypeNumber :: forall m . Monad m => ParserT String m Term
+parseTypeNumber :: forall m n . Monad m => ParserT String m (Term n)
 parseTypeNumber = reserved "Number" *> pure (cat TypeNumber)
  
 
-parseTypeArrow :: forall m . Monad m => Term -> ParserT String m Term
+parseTypeArrow :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
 parseTypeArrow a = do
   reservedOp "->"
   b <- parseType
   pure (app (app (cat Arrow) a) b)
 
-parseStar :: forall m . Monad m => ParserT String m Term
+parseStar :: forall m n . Monad m => ParserT String m (Term n)
 parseStar = choice (star <$> (1 .. 4))
   where
     star i = do
       reservedOp (fromCharArray (replicate i '*'))
       pure $ cat (Star i)
 
-parseTypeAbs :: forall m . Monad m => ParserT String m Term
+parseTypeAbs :: forall m n. Monad m => ParserT String m (Term n)
 parseTypeAbs = absMany <$> parsePats <*> parseType
   where
     parsePats = reservedOp "forall" *> many1Till (TypeVar <$> identifier) (reservedOp ".")
 
-parseTypeApp :: forall m . Monad m => Term -> ParserT String m Term
+parseTypeApp :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
 parseTypeApp v = app v <$> parseTypeAtom
 
-
-data UnificationError =
+data UnificationError m =
     NotInScope Var
   | Err String
-  | InvalidApp Term Term
-  | UnificationError Term Term 
+  | InvalidApp (Term m) (Term m)
+  | UnificationError (Term m) (Term m) 
 
-derive instance Generic UnificationError _
-instance Show UnificationError where
+derive instance Generic (UnificationError m) _
+instance Show (UnificationError m) where
   show = genericShow
-instance Eq UnificationError where
+instance Eq (UnificationError m) where
   eq = genericEq
 
-instance ArrowObject (TT a) where
+instance ArrowObject ((TT m) a) where
   arrowObject = Arrow
 
 instance Enumerable Var where
   fromInt i = TypeVar ("t" <> show i)
 
-instance NotInScopeError Var UnificationError where 
+instance NotInScopeError Var (UnificationError m) where 
   notInScopeError = NotInScope
 
-instance InfiniteTypeError Var Term UnificationError where
+instance InfiniteTypeError Var (Term m) (UnificationError m) where
   infiniteTypeError v t = Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
 
-instance UnificationError Term UnificationError where 
+instance UnificationError (Term m) (UnificationError m) where 
   unificationError = UnificationError 
 
 
 instance
-  ( MonadThrow UnificationError m
+  ( MonadThrow (UnificationError n) m
   , Fresh Var m
-  , MonadState (TypingContext Var Mu Var TT) m
-  ) => Unification (TT Term) m where
+  , MonadState (TypingContext Var Mu Var (TT n)) m
+  ) => Unification (TT n (Term n)) m where
   unify Arrow Arrow = pure Arrow
   -- TODO concerned that our hierarchy of type universes may permit paradox
   -- should the type of the arrow be the max of the types of the domain/codomain i.e. (* -> * :: **)
@@ -221,30 +223,30 @@ instance
 
 instance
   ( Monad m
-  , Unification Term m
-  ) => Inference Var TT Term m where
+  , Unification (Term n) m
+  ) => Inference Var (TT n) (Term n) m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
   inference (TypeAnnotation v t) = do
-    (t' :: Cofree (LambdaF Var TT) Term) <- v
-    _ <- unify (t :: Term) (head t' :: Term)
+    (t' :: Cofree (LambdaF Var (TT n)) (Term n)) <- v
+    _ <- unify (t :: Term n) (head t' :: Term n)
     pure (t :< tail t')
   inference (Bottom e) = pure (cat (Bottom e) :< Cat (Bottom e))
   inference TypeInt = pure $ (cat (Star 1) :< Cat TypeInt)
   inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
-  inference (Native (Pure n)) = pure $ n.nativeType :< Cat (Native (Pure n))
-  inference (Native (Effect n)) = pure $ n.nativeType :< Cat (Native (Effect n))
+  inference TypeEffect = pure $ arrow (cat (Star 1)) (cat (Star 1)) :< Cat TypeEffect
+  inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
-instance Applicative m => Evaluate Mu Var TT m where
+instance Applicative m => Evaluate Mu Var (TT m) m where
   thunk (Native n) = pure $ Native n
   thunk e = pure $ Bottom $ "Machine terminated on a non-thunk object: " <> show (const unit <$> e)
 
-  functor (Native (Pure { nativeTerm, nativeType })) arg =
+  functor (Native (Purescript { nativeTerm, nativeType })) arg =
     case project nativeType of
       App (In (App (In (Cat Arrow)) (In (Cat argTy)))) ret -> 
         case unwrap argTy arg of
           Just i ->
-            pure $ cat $ Native $ Pure { nativeTerm: nativeTerm i
+            pure $ cat $ Native $ Purescript { nativeTerm: nativeTerm  i
                                        , nativeType: ret
                                        }
           Nothing -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType 
@@ -252,21 +254,20 @@ instance Applicative m => Evaluate Mu Var TT m where
       _ -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType
   functor e _ = pure $ cat $ Bottom $ "Machine applied non-functor object: " <> show (const unit <$> e)
 
-data Native m =
-    Pure { nativeType :: Term, nativeTerm :: forall a. a }
-  | Effect { nativeType :: Term, nativeTerm :: m (forall a. a) }
+
+newtype Native :: (Type -> Type) -> Type
+newtype Native m = Purescript { nativeType :: Term m, nativeTerm :: forall a. a }
+
 
 
 instance Eq (Native m) where
-  eq (Pure a) (Pure b) = a.nativeType == b.nativeType && (a.nativeTerm :: String) == b.nativeTerm
-  eq _ _ = false
+  eq (Purescript a) (Purescript b) = a.nativeType == b.nativeType && (a.nativeTerm :: String) == b.nativeTerm
 
 instance Show (Native m) where
-  show (Pure { nativeType }) = "(_ :: " <> prettyPrint nativeType <> ")"
-  show (Effect { nativeType }) = "(_ :: " <> prettyPrint nativeType <> ")"
+  show (Purescript { nativeType }) = "(_ :: " <> prettyPrint nativeType <> ")"
 
-unwrap :: forall x. TT x -> TT Void -> Maybe (forall a . a) 
-unwrap _ (Native (Pure { nativeTerm })) = Just nativeTerm
+unwrap :: forall x m. (TT m) x -> (TT m) Void -> Maybe (forall a . a) 
+unwrap _ (Native (Purescript { nativeTerm })) = Just nativeTerm
 unwrap _ _ = Nothing
 
 intPlus :: forall m . Native m
@@ -281,24 +282,42 @@ int i = native i
 num :: forall m . Number -> Native m
 num i = native i
 
-class Reifies :: forall k. k -> Constraint
-class Reifies s where
-  reify :: Proxy s -> Term
-
-
-native :: forall m t . Reifies t => t -> Native m
-native term = Pure
+native :: forall m t . Reifies t m => t -> Native m
+native term = Purescript
   { nativeType: reify (Proxy :: Proxy t)
   , nativeTerm: unsafeCoerce term
   }
 
+pureLogInt :: forall m. Reifies m m => MonadEffect m => Native m
+pureLogInt = native prim
+  where
+    prim :: Int -> m Int
+    prim a = liftEffect (log (show a)) *> pure 0
 
-instance Reifies Int where
+
+pureEffectInt :: forall m. Reifies m m => Applicative m => Native m
+pureEffectInt = native prim
+  where
+    prim :: Int -> m Int
+    prim = pure 
+
+
+class Reifies :: forall k. k -> (Type -> Type) -> Constraint
+class Reifies s m where
+  reify :: Proxy s -> (Term m)
+
+instance Reifies (->) m where
+  reify _ = cat Arrow
+else
+instance Reifies Int m where
   reify _ = cat TypeInt
-
-instance Reifies Number where
+else
+instance Reifies Number m where
   reify _ = cat TypeNumber
-
-instance (Reifies a, Reifies b) => Reifies (a -> b) where
-  reify _ = arrow (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b)) 
+else
+instance (Reifies a m, Reifies b m) => Reifies (a b) m where
+  reify _ = app (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b))
+else
+instance Reifies m m where
+  reify _ = cat TypeEffect
 

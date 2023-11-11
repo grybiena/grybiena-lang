@@ -89,15 +89,15 @@ testInferType :: String -> String -> TestSuite
 testInferType v t = test ("(" <> v <> ") :: " <> t) do
   case Tuple <$> termParser v <*> typeParser t of
     Left err -> Assert.assert ("parse error: " <> show err) false
-    Right (val /\ typ) -> do
+    Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
       case runInference val of
-        Left (err :: UnificationError) -> Assert.assert ("infer error: " <> show err) false
+        Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> show err) false
         Right suc ->
           case alphaEquivalent suc typ of
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
             Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> show err) false
 
-testRun :: String -> TT Void -> TestSuite
+testRun :: String -> TT Identity Void -> TestSuite
 testRun v h = test ("run (" <> v <> ")") do
   case termParser v of
     Left err -> Assert.assert ("parse error: " <> show err) false
@@ -112,9 +112,9 @@ testInferKind :: String -> String -> TestSuite
 testInferKind v t = test ("(" <> v <> ") :: " <> t) do
   case Tuple <$> typeParser v <*> typeParser t of
     Left err -> Assert.assert ("parse error: " <> show err) false
-    Right (val /\ typ) -> do
+    Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
       case runInference val of
-        Left (err :: UnificationError) -> Assert.assert ("infer error: " <> show err) false
+        Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> show err) false
         Right suc ->
           case alphaEquivalent suc typ of
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
@@ -122,19 +122,19 @@ testInferKind v t = test ("(" <> v <> ") :: " <> t) do
 
 
 
-testExpectErr :: String -> UnificationError -> TestSuite
+testExpectErr :: String -> UnificationError Identity -> TestSuite
 testExpectErr v e = test ("(" <> v <> ") :: _|_") do
   case termParser v of
     Left err -> Assert.assert ("parse error: " <> show err) false
-    Right (val :: Term) -> do
+    Right (val :: Term Identity) -> do
       case runInference val of
         Left e' -> Assert.equal e e'
-        Right (_ :: Term) -> Assert.assert "Expected failure but got success" false
+        Right (_ :: Term Identity) -> Assert.assert "Expected failure but got success" false
 
 
-alphaEquivalent :: Term -> Term -> Either UnificationError Boolean
+alphaEquivalent :: forall m. Term m -> Term m -> Either (UnificationError m ) Boolean
 alphaEquivalent t1 t2 = do
-  a <- fst do
+  a <- fst do 
     runUnification do
        _ <- unify t2 t1
        x <- rewrite t2
@@ -147,14 +147,14 @@ alphaEquivalent t1 t2 = do
   pure (a && b)
 
 
-typeParser :: String -> Either ParseError Term
+typeParser :: forall m. String -> Either ParseError (Term m)
 typeParser s = runIndent $ runParserT s do
   v <- parseType
   eof
   pure v
 
 
-termParser :: String -> Either ParseError Term
+termParser :: forall m. String -> Either ParseError (Term m)
 termParser s = runIndent $ runParserT s do
   v <- parseValue
   eof
