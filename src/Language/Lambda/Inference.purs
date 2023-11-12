@@ -158,5 +158,46 @@ instance
  
 
  
+-- Elaboration of ininite inference 
+---- 
+-- type Elaboration f var cat
+-- represents the infinite elaboration of the inference homomorphism
+-- where `flute` extracts the term at the current level
+-- and `pitch` lifts the elaboration to the next level
+
+-- i.e term ~ flute <$> infer term 
+--     type ~ flute <<< pitch <$> infer term
+--     kind ~ flute <<< pitch <<< pitch <$> infer term
+
+-- and so on...
+
+-- a well kinded term should converge on the infinite sequence of Stars
+
+-- the question is can we lazily create a value of type Elaboration f var cat...
+
+type Elaboration :: forall k. ((Type -> Type) -> k) -> Type -> (Type -> Type) -> k
+type Elaboration f var cat = f (Cofree (LambdaF var cat))
+
+flute :: forall f var cat.
+        Functor cat
+     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+     => Recursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
+     => Corecursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
+     => Elaboration f var cat
+     -> f (LambdaF var cat) 
+flute c = embed ((flute <<< embed) <$> (tail (project c)))
  
+pitch :: forall f var cat.
+        Functor cat
+     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+     => Recursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
+     => Corecursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
+     => Elaboration f var cat 
+     -> Elaboration f var cat
+pitch = head <<< project
+
+
+
 

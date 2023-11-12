@@ -212,7 +212,7 @@ instance Pretty (UnificationError m) where
   pretty (NotInScope v) = text "Not in scope:" <+> pretty v
   pretty (Err err) = text "Error:" <+> text err
   pretty (InvalidApp a b) = text "Invalid app:" <+> pretty a <+> pretty b
-  pretty (UnificationError a b) = text "Unification error:" <+> pretty a <+> pretty b
+  pretty (UnificationError a b) = text "Unification error:" <+> pretty a <+> text "=?=" <+> pretty b
 
 instance Eq (UnificationError m) where
   eq = genericEq
@@ -272,9 +272,6 @@ instance
 
 instance
   ( Monad m
---  , Unification (Term m) m
---  , MonadState (TypingContext Var Mu Var (TT m)) m
---  , Substitute Var (TT m) Mu m
   ) => Evaluate Mu Var (TT m) m where
   thunk (Native n@(Purescript { nativeType, nativeTerm })) =
     case project nativeType of
@@ -295,6 +292,8 @@ instance
           Nothing -> pure $ cat $ Bottom $ "Cannot unwrap `_ :: " <> prettyPrint nativeType <> "` to " <> show arg
       -- Type level lambda application
       Abs v b -> do
+         -- TODO maintain the unification context from when the program the machine is running was inferred
+         -- (runUnification should be in m)
          let ret = fst $ runUnification do
                      void $ unify (var v) (cat (unsafeCoerce arg) :: Term m)
                      rewrite b

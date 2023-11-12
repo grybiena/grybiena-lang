@@ -36,6 +36,8 @@ grybuTests = runTest do
     testExpectErr "\\f -> (\\x -> f (x x)) (\\x -> f (x x))" $
                   Err "An infinite type was inferred for an expression: (t3 -> t4) while trying to match type t3"
     testInferType "\\x -> x" "a -> a"
+    testInferTypeThenKind "\\x -> x" "a -> a"
+
     testInferType "\\x y -> x" "a -> b -> a"
     testInferType "\\x y -> y" "a -> b -> b"
     testInferType "\\x y -> x y" "(a -> b) -> a -> b"
@@ -88,6 +90,11 @@ grybuTests = runTest do
 -- Pure
     testInferType "pureEffect" "(forall a. a -> (Effect a))"
     testInferType "pureEffect @Int" "Int -> Effect Int"
+
+    testInferTypeThenKind "pureEffect @Int" "*"
+
+    testInferTypeThenKind "pureEffect 1" "Int -> Effect Int"
+
     testRun "pureEffect @Int 1" (Native $ int 1)
 
 -- Bind
@@ -111,7 +118,25 @@ testInferType v t = test ("(" <> v <> ") :: " <> t) do
         Right suc ->
           case alphaEquivalent suc typ of
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
-            Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> show err) false
+            Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> prettyPrint err) false
+
+
+testInferTypeThenKind :: String -> String -> TestSuite
+testInferTypeThenKind v k = test ("(" <> v <> ") :: " <> k) do
+  case Tuple <$> termParser v <*> typeParser k of
+    Left err -> Assert.assert ("parse error: " <> show err) false
+    Right ((val :: Term Identity) /\ (kin :: Term Identity)) -> do
+      case runInference val of
+        Left (err :: UnificationError Identity) -> Assert.assert ("type infer error: " <> prettyPrint err) false
+        Right (typ :: Term Identity) ->
+          case runInference typ of
+            Left (err :: UnificationError Identity) -> Assert.assert ("kind infer error: " <> prettyPrint err) false
+            Right suc ->
+              case alphaEquivalent suc kin of
+                Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> prettyPrint err) false
+                Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
+
+
 
 testRun :: String -> TT Identity Void -> TestSuite
 testRun v h = test ("run (" <> v <> ")") do
