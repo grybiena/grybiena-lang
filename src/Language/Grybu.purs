@@ -123,7 +123,7 @@ parseValueAtom :: forall m n. Monad m => Monad n => ParserT String m (Term n)
 parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> parsePureEffect <|> parseBindEffect <|> parseTypeLit <|> (parens parseValue)
 
 parseTypeLit :: forall m n. Monad m => ParserT String m (Term n)
-parseTypeLit = char '@' *> parseType 
+parseTypeLit = char '@' *> parseTypeAtom 
 
 parseNumeric :: forall m n. Monad m => ParserT String m (Term n)
 parseNumeric = (try parseNumber) <|> parseInt

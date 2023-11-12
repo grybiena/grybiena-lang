@@ -2,13 +2,14 @@ module Language.Lambda.Inference where
 
 import Prelude
 
-import Control.Comonad.Cofree (Cofree, head, tail, (:<))
+import Control.Comonad.Cofree (Cofree, deferCofree, head, tail, (:<))
 import Control.Monad.Except (ExceptT)
 import Control.Monad.State (State)
 import Data.Either (Either)
 import Data.Foldable (class Foldable)
+import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..), fst)
-import Data.Tuple.Nested ((/\))
+import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF(..), app, cat, var)
 import Language.Lambda.Unification (class Context, class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Rewrite, class Unification, class UnificationError, TypingContext, assume, fresh, require, rewrite, runUnification, unify)
 import Matryoshka.Algebra (Algebra)
@@ -162,23 +163,23 @@ instance
 ---- 
 -- type Elaboration f var cat
 -- represents the infinite elaboration of the inference homomorphism
--- where `flute` extracts the term at the current level
--- and `pitch` lifts the elaboration to the next level
+-- where `level` extracts the term at the current level
+-- and `ascend` lifts the elaboration to the next level
 
--- i.e term ~ flute <$> infer term 
---     type ~ flute <<< pitch <$> infer term
---     kind ~ flute <<< pitch <<< pitch <$> infer term
+-- i.e term ~ level <$> infer term 
+--     type ~ level <<< ascend <$> infer term
+--     kind ~ level <<< ascend <<< ascend <$> infer term
 
 -- and so on...
 
--- a well kinded term should converge on the infinite sequence of Stars
+-- a well typed term should converge on the infinite sequence of Stars
 
 -- the question is can we lazily create a value of type Elaboration f var cat...
 
 type Elaboration :: forall k. ((Type -> Type) -> k) -> Type -> (Type -> Type) -> k
 type Elaboration f var cat = f (Cofree (LambdaF var cat))
 
-flute :: forall f var cat.
+level :: forall f var cat.
         Functor cat
      => Recursive (f (LambdaF var cat)) (LambdaF var cat)
      => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
@@ -186,9 +187,9 @@ flute :: forall f var cat.
      => Corecursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
      => Elaboration f var cat
      -> f (LambdaF var cat) 
-flute c = embed ((flute <<< embed) <$> (tail (project c)))
+level c = embed ((level <<< embed) <$> (tail (project c)))
  
-pitch :: forall f var cat.
+ascend :: forall f var cat.
         Functor cat
      => Recursive (f (LambdaF var cat)) (LambdaF var cat)
      => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
@@ -196,8 +197,14 @@ pitch :: forall f var cat.
      => Corecursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
      => Elaboration f var cat 
      -> Elaboration f var cat
-pitch = head <<< project
+ascend = head <<< project
 
 
 
+--deferCofree :: forall f a. (Unit -> Tuple a (f (Cofree f a))) -> Cofree f a
 
+elab :: forall f var cat .
+        Corecursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
+     => (Unit -> Elaboration f var cat /\ LambdaF var cat (Cofree (LambdaF var cat) (Elaboration f var cat)))
+     -> Elaboration f var cat
+elab i = embed (deferCofree i)

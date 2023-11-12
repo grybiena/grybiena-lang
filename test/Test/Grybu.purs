@@ -97,6 +97,22 @@ grybuTests = runTest do
 
     testRun "pureEffect @Int 1" (Native $ int 1)
 
+    testRun "bindEffect @Int @Int (pureEffect @Int 1) (pureEffect @Int)" (Native $ int 1)
+ 
+    -- TODO this causes a stack fault since evaluation of the lambda expects an argument on the stack
+    -- and the machine cannot halt on the lambda
+    -- bindEffect must work at the machine level, evaluating the first argument, then placing it on
+    -- the stack for consumption by the second argument
+    -- ALT instead of a stack fault we should bind a callback in a Comonadic way 
+    -- i.e. reverse the semantics of application, whenever a Native is applied to a callback
+    -- we unwrap the callback and realise that we have to apply the callback to the native
+    -- i.e we end up applying (pureEffect ~ Native :: Int -> Effect Int) to (Callback :: (a -> x) -> x) 
+    -- which resolves by applying the callback to the native
+    -- resulting in a (Native :: Effect Int)
+
+    testRun "bindEffect @Int @Int (pureEffect @Int 1) (\\a -> pureEffect @Int a)" (Native $ int 1)
+
+
 -- Bind
     testInferType "bindEffect" "forall b a. Effect a -> (a -> Effect b) -> Effect b"
     testInferType "bindEffect" "forall a b. Effect a -> (a -> Effect b) -> Effect b"
