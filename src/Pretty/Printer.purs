@@ -2,7 +2,7 @@ module Pretty.Printer where
 
 import Control.Category (identity)
 import Data.Functor.Mu (Mu(..))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), prettyAbs, prettyApp, prettyCat, prettyVar)
+import Language.Lambda.Calculus (class PrettyLambda, Lambda, LambdaF(..), prettyAbs, prettyApp, prettyCat, prettyVar)
 import Prettier.Printer (DOC)
 import Prettier.Printer as PP
 
@@ -20,9 +20,6 @@ instance PrettyLambda var cat => Pretty (Lambda var cat) where
       App f a -> prettyApp f a
       Var i -> prettyVar i
       Cat c -> prettyCat c
-else
-instance PrettyVar var => Pretty var where
-  pretty = prettyVar
 
 prettyPrint :: forall a . Pretty a => a -> String
 prettyPrint a = PP.pretty 80 (pretty a)

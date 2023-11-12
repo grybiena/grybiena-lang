@@ -8,6 +8,7 @@ import Control.Lazy (defer)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate, (..))
+import Data.Either (Either(..))
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
@@ -17,19 +18,22 @@ import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
+import Data.Tuple (fst, uncurry)
+import Data.Tuple.Nested (type (/\), (/\))
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), absMany, app, cat, prettyVar, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, fresh, unificationError, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, rewrite, runUnification, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
 import Machine.Krivine (class Evaluate)
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
+import Parsing.String (char)
 import Prettier.Printer (text, (<+>))
-import Pretty.Printer (pretty, prettyPrint)
+import Pretty.Printer (class Pretty, pretty, prettyPrint)
 import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -46,8 +50,6 @@ data TT m a =
   | TypeEffect
 
   -- Values
-  | PureEffect
-  | BindEffect
   | TypeAnnotation a (Term m)
   | Native (Native m)
 
@@ -66,8 +68,6 @@ instance Functor (TT m) where
   map _ TypeInt = TypeInt
   map _ TypeNumber = TypeNumber
   map _ TypeEffect = TypeEffect
-  map _ PureEffect = PureEffect
-  map _ BindEffect = BindEffect
   map _ (Native n) = Native n
 
 
@@ -98,9 +98,12 @@ instance PrettyVar Var where
   prettyVar (TypeVar v) = text v
   prettyVar (TermVar v) = text v
 
+instance Pretty Var where
+  pretty = prettyVar
+
 instance PrettyLambda Var (TT m) where
   prettyAbs (TermVar i) a = (text "\\" <> prettyVar i) <+> text "->" <+> pretty a
-  prettyAbs (TypeVar i) a = (text "forall" <> prettyVar i) <+> text "." <+> pretty a
+  prettyAbs (TypeVar i) a = (text "forall " <> prettyVar i) <+> text "." <+> pretty a
   prettyApp (In (App (In (Cat Arrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"
   prettyApp f a = text "(" <+> pretty f <+> pretty a <+> text ")"
   prettyCat Arrow = text "->"
@@ -110,17 +113,17 @@ instance PrettyLambda Var (TT m) where
   prettyCat TypeInt = text "Int"
   prettyCat TypeNumber = text "Number"
   prettyCat TypeEffect = text "Effect" 
-
-  prettyCat BindEffect = text "bindEffect"
-  prettyCat PureEffect = text "pureEffect"
   prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
 
 
-parseValue :: forall m n. Monad m => ParserT String m (Term n)
+parseValue :: forall m n. Monad m => Monad n => ParserT String m (Term n)
 parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
 
-parseValueAtom :: forall m n. Monad m => ParserT String m (Term n)
-parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> parsePureEffect <|> parseBindEffect <|> (parens parseValue)
+parseValueAtom :: forall m n. Monad m => Monad n => ParserT String m (Term n)
+parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> parsePureEffect <|> parseBindEffect <|> parseTypeLit <|> (parens parseValue)
+
+parseTypeLit :: forall m n. Monad m => ParserT String m (Term n)
+parseTypeLit = char '@' *> parseType 
 
 parseNumeric :: forall m n. Monad m => ParserT String m (Term n)
 parseNumeric = (try parseNumber) <|> parseInt
@@ -128,12 +131,14 @@ parseNumeric = (try parseNumber) <|> parseInt
 parseInt :: forall m n. Monad m => ParserT String m (Term n)
 parseInt = cat <<< Native <<< native <$> integer
  
-parsePureEffect :: forall m n. Monad m => ParserT String m (Term n)
-parsePureEffect = reserved "pureEffect" *> pure (cat PureEffect)
+parsePureEffect :: forall m n. Monad m => Monad n => ParserT String m (Term n)
+parsePureEffect = reserved "pureEffect" *> pure (cat $ Native pureE)
 
-parseBindEffect :: forall m n. Monad m => ParserT String m (Term n)
-parseBindEffect = reserved "bindEffect" *> pure (cat BindEffect)
+parseBindEffect :: forall m n. Monad m => Bind n => ParserT String m (Term n)
+parseBindEffect = reserved "bindEffect" *> pure (cat $ Native bindE)
  
+parseNatives :: forall m n. Monad m => Array (String /\ Native n) -> ParserT String m (Term n)
+parseNatives = choice <<< map (uncurry parseNative)
  
 parseNative :: forall m n. Monad m => String -> Native n -> ParserT String m (Term n)
 parseNative name n = reserved name *> pure (cat (Native n))
@@ -147,12 +152,12 @@ parseTypeAnnotation v = do
   t <- parseType
   pure $ cat $ TypeAnnotation v t
  
-parseAbs :: forall m n. Monad m => ParserT String m (Term n)
+parseAbs :: forall m n. Monad m => Monad n => ParserT String m (Term n)
 parseAbs = absMany <$> parsePats <*> parseValue
   where
     parsePats = reservedOp "\\" *> many1Till (TermVar <$> identifier) (reservedOp "->")
 
-parseApp :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
+parseApp :: forall m n. Monad m => Monad n => (Term n) -> ParserT String m (Term n)
 parseApp v = app v <$> parseValueAtom
 
 parseType :: forall m n. Monad m => ParserT String m (Term n)
@@ -199,8 +204,16 @@ data UnificationError m =
   | UnificationError (Term m) (Term m) 
 
 derive instance Generic (UnificationError m) _
+
 instance Show (UnificationError m) where
   show = genericShow
+
+instance Pretty (UnificationError m) where
+  pretty (NotInScope v) = text "Not in scope:" <+> pretty v
+  pretty (Err err) = text "Error:" <+> text err
+  pretty (InvalidApp a b) = text "Invalid app:" <+> pretty a <+> pretty b
+  pretty (UnificationError a b) = text "Unification error:" <+> pretty a <+> pretty b
+
 instance Eq (UnificationError m) where
   eq = genericEq
 
@@ -255,29 +268,39 @@ instance
   inference TypeInt = pure $ (cat (Star 1) :< Cat TypeInt)
   inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
   inference TypeEffect = pure $ arrow (cat (Star 1)) (cat (Star 1)) :< Cat TypeEffect
-  inference PureEffect = do
-     a <- fresh
-     pure $ arrow a (app (cat TypeEffect) a) :< Cat PureEffect
-  inference BindEffect = do
-     a <- fresh
-     b <- fresh
-     pure $ arrow (app (cat TypeEffect) a) (arrow (arrow a (app (cat TypeEffect) b)) (app (cat TypeEffect) b)) :< Cat BindEffect
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
-instance Applicative m => Evaluate Mu Var (TT m) m where
-  thunk (Native n) = pure $ Native n
+instance
+  ( Monad m
+--  , Unification (Term m) m
+--  , MonadState (TypingContext Var Mu Var (TT m)) m
+--  , Substitute Var (TT m) Mu m
+  ) => Evaluate Mu Var (TT m) m where
+  thunk (Native n@(Purescript { nativeType, nativeTerm })) =
+    case project nativeType of
+      App (In (Cat TypeEffect)) ret -> do
+        res <- (unsafeCoerce nativeTerm :: m (forall a. a))
+        pure $ Native (Purescript { nativeType: ret, nativeTerm: res })
+      _ -> pure $ Native n
+  thunk TypeInt = pure TypeInt
   thunk e = pure $ Bottom $ "Machine terminated on a non-thunk object: " <> show (const unit <$> e)
 
   functor (Native (Purescript { nativeTerm, nativeType })) arg =
     case project nativeType of
-      App (In (App (In (Cat Arrow)) (In (Cat argTy)))) ret -> 
-        case unwrap argTy arg of
+      -- Value level lambda application
+      App (In (App (In (Cat Arrow)) _)) ret -> 
+        case unwrap arg of
           Just i ->
-            pure $ cat $ Native $ Purescript { nativeTerm: nativeTerm  i
-                                       , nativeType: ret
-                                       }
-          Nothing -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType 
-                                      <> "` to " <> show arg
+            pure $ cat $ Native $ Purescript { nativeTerm: nativeTerm  i, nativeType: ret }
+          Nothing -> pure $ cat $ Bottom $ "Cannot unwrap `_ :: " <> prettyPrint nativeType <> "` to " <> show arg
+      -- Type level lambda application
+      Abs v b -> do
+         let ret = fst $ runUnification do
+                     void $ unify (var v) (cat (unsafeCoerce arg) :: Term m)
+                     rewrite b
+         case ret of
+           Left (err :: UnificationError m) -> pure $ cat $ Bottom $ "Run-time type application error: " <> show err 
+           Right rew -> pure $ cat $ Native $ Purescript { nativeTerm: unsafeCoerce nativeTerm, nativeType: rew }
       _ -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType
   functor e _ = pure $ cat $ Bottom $ "Machine applied non-functor object: " <> show (const unit <$> e)
 
@@ -293,9 +316,9 @@ instance Eq (Native m) where
 instance Show (Native m) where
   show (Purescript { nativeType }) = "(_ :: " <> prettyPrint nativeType <> ")"
 
-unwrap :: forall x m. (TT m) x -> (TT m) Void -> Maybe (forall a . a) 
-unwrap _ (Native (Purescript { nativeTerm })) = Just nativeTerm
-unwrap _ _ = Nothing
+unwrap :: forall m. (TT m) Void -> Maybe (forall a . a) 
+unwrap (Native (Purescript { nativeTerm })) = Just nativeTerm
+unwrap _ = Nothing
 
 intPlus :: forall m . Native m
 intPlus = native (\(a :: Int) (b :: Int) -> a + b)
@@ -306,7 +329,7 @@ numPlus = native (\(a :: Number) (b :: Number) -> a + b)
 int :: forall m . Int -> Native m
 int i = native i
 
-num :: forall m . Number -> Native m
+num :: forall m. Number -> Native m
 num i = native i
 
 native :: forall m t . Reifies t m => t -> Native m
@@ -315,20 +338,55 @@ native term = Purescript
   , nativeTerm: unsafeCoerce term
   }
 
-pureLogInt :: forall m. Reifies m m => MonadEffect m => Native m
-pureLogInt = native prim
+logInt :: forall m. Reifies m m => MonadEffect m => Native m
+logInt = native prim
   where
     prim :: Int -> m Int
     prim a = liftEffect (log (show a)) *> pure 0
 
+pureE :: forall m. Applicative m => Native m
+pureE = Purescript
+  { -- TODO generate fresh type variables when parsing
+    nativeType: abs (TypeVar "a") (arrow (var (TypeVar "a")) (app (cat TypeEffect) (var (TypeVar "a")))) 
+  , nativeTerm:
+      let prim :: forall a. a -> m a
+          prim = pure
+       in unsafeCoerce prim
+  }
+ 
+bindE :: forall m. Bind m => Native m
+bindE = Purescript
+  { -- TODO generate fresh type variables when parsing
+    nativeType:
+      let va = TypeVar "a"
+          a = var va
+          vb = TypeVar "b"
+          b = var vb 
+       in abs va (abs vb (arrow (app (cat TypeEffect) a) (arrow (arrow a (app (cat TypeEffect) b)) (app (cat TypeEffect) b))))
+  , nativeTerm:
+      let prim :: forall a b. m a -> (a -> m b) -> m b
+          prim = (>>=)
+       in unsafeCoerce prim
+  }
+ 
+
+natives :: forall m. Reifies m m => MonadEffect m =>  Array (String /\ Native m)
+natives =
+  [ "intPlus" /\ intPlus
+  , "numPlus" /\ numPlus
+  , "logInt" /\ logInt
+  ]
 
 
-pureEffectInt :: forall m. Reifies m m => Applicative m => Native m
-pureEffectInt = native prim
-  where
-    prim :: Int -> m Int
-    prim = pure 
+-- better to use homogenous records
+-- natives :: forall row m . Homogeneous row (Native m) => Record row
+--
+-- then combine using disjoint union (preventing overlap of names)
+-- allowing modularisation of Native effects which have different constraints
+--
+-- then unfold into Array (String /\ Native m) and build the parser for that constrained runtime
 
+data U (a :: Symbol)
 
 class Reifies :: forall k. k -> (Type -> Type) -> Constraint
 class Reifies s m where
@@ -348,4 +406,6 @@ instance (Reifies a m, Reifies b m) => Reifies (a b) m where
 else
 instance Reifies m m where
   reify _ = cat TypeEffect
+
+
 

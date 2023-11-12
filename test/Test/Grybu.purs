@@ -55,8 +55,6 @@ grybuTests = runTest do
 
     testInferType "1 :: Int :: *" "Int" 
 
-    testInferType "pureEffect" "a -> Effect a"
-    testInferType "bindEffect" "Effect a -> (a -> Effect b) -> Effect b"
 
 
     testInferKind "forall a . a" "k -> k"
@@ -87,6 +85,21 @@ grybuTests = runTest do
 --    testRun "intPlus (1 1)" (Native $ int 4)
 
 
+-- Pure
+    testInferType "pureEffect" "(forall a. a -> (Effect a))"
+    testInferType "pureEffect @Int" "Int -> Effect Int"
+    testRun "pureEffect @Int 1" (Native $ int 1)
+
+-- Bind
+    testInferType "bindEffect" "forall b a. Effect a -> (a -> Effect b) -> Effect b"
+    testInferType "bindEffect" "forall a b. Effect a -> (a -> Effect b) -> Effect b"
+
+
+    -- TODO this should fail
+    testInferType "bindEffect" "forall x y. Effect a -> (a -> Effect b) -> Effect b"
+
+
+
 
 testInferType :: String -> String -> TestSuite
 testInferType v t = test ("(" <> v <> ") :: " <> t) do
@@ -94,7 +107,7 @@ testInferType v t = test ("(" <> v <> ") :: " <> t) do
     Left err -> Assert.assert ("parse error: " <> show err) false
     Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
       case runInference val of
-        Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> show err) false
+        Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> prettyPrint err) false
         Right suc ->
           case alphaEquivalent suc typ of
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
@@ -117,7 +130,7 @@ testInferKind v t = test ("(" <> v <> ") :: " <> t) do
     Left err -> Assert.assert ("parse error: " <> show err) false
     Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
       case runInference val of
-        Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> show err) false
+        Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> prettyPrint err) false
         Right suc ->
           case alphaEquivalent suc typ of
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
@@ -141,12 +154,14 @@ alphaEquivalent t1 t2 = do
     runUnification do
        _ <- unify t2 t1
        x <- rewrite t2
-       pure  (universe x == universe t1)
+       y <- rewrite t1
+       pure  (universe x == universe y)
   b <- fst do
     runUnification do
        _ <- unify t1 t2
        x <- rewrite t1
-       pure  (universe x == universe t2)
+       y <- rewrite t2
+       pure  (universe x == universe y)
   pure (a && b)
 
 
@@ -157,7 +172,7 @@ typeParser s = runIndent $ runParserT s do
   pure v
 
 
-termParser :: forall m. String -> Either ParseError (Term m)
+termParser :: forall m. Monad m => String -> Either ParseError (Term m)
 termParser s = runIndent $ runParserT s do
   v <- parseValue
   eof

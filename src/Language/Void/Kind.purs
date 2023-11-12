@@ -49,6 +49,9 @@ type Kind' = Lambda KiVar KI
 instance PrettyVar KiVar where
   prettyVar (KiVar v) = text v
 
+instance Pretty KiVar where
+  pretty = prettyVar
+
 instance PrettyLambda KiVar KI where
   prettyAbs i a = text "forall" <+> (prettyVar i <> text ".") <+> pretty a
   prettyApp (In (App (In (Cat KArrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"

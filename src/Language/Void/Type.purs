@@ -20,7 +20,7 @@ import Language.Void.Value (ValVar, Value)
 import Parsing (ParserT)
 import Parsing.Combinators (many1Till)
 import Prettier.Printer (text, (<+>))
-import Pretty.Printer (pretty, prettyPrint)
+import Pretty.Printer (class Pretty, pretty, prettyPrint)
 
 data TT :: forall k. k -> Type
 data TT a =
@@ -47,6 +47,8 @@ type Type' = Lambda TyVar TT
 instance PrettyVar TyVar where
   prettyVar (TyVar v) = text v
 
+instance Pretty TyVar where
+  pretty = prettyVar
 instance PrettyLambda TyVar TT where
   prettyAbs i a = text "forall" <+> (prettyVar i <> text ".") <+> pretty a
   prettyApp (In (App (In (Cat Arrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"
