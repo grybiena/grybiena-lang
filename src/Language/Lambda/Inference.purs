@@ -11,7 +11,6 @@ import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (LambdaF(..), app, cat, var)
 import Language.Lambda.Unification (class Context, class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Rewrite, class Unification, class UnificationError, TypingContext, assume, fresh, require, rewrite, runUnification, unify)
-import Language.Void.Value (VoidF(..))
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
@@ -80,9 +79,6 @@ rule expr =
 
 class Inference var cat typ m where
   inference :: cat (m (Cofree (LambdaF var cat) typ)) -> m (Cofree (LambdaF var cat) typ)
-
-instance Inference var VoidF typ m where 
-  inference (VoidF v) = absurd v
 
 absRule :: forall m typ var cat.
            Bind m
