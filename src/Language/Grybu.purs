@@ -6,6 +6,7 @@ import Control.Alt ((<|>))
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Lazy (defer)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
+import Control.Monad.Rec.Class (Step(..))
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate, (..))
 import Data.Either (Either(..))
@@ -26,7 +27,7 @@ import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, La
 import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, rewrite, runUnification, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
-import Machine.Krivine (class Evaluate)
+import Machine.Krivine (class Evaluate, class MachineFault)
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
@@ -252,6 +253,11 @@ instance
   unify TypeEffect TypeEffect = pure TypeEffect
   unify a b = throwError $ unificationError (cat a) (cat b)
 
+instance 
+  ( Monad m
+  ) => MachineFault Mu Var (TT n) ctx m where
+  contextFault _ v = pure $ Done $ Bottom $ "Variable " <> prettyPrint v <> " not in scope."
+  stackFault _ = pure $ Done $ Bottom $ "StackFault."
 
 instance
   ( Monad m

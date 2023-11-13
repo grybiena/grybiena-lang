@@ -1,22 +1,31 @@
 module Machine.Krivine where
 
--- For a description of Krivine Machines see this article
--- https://www.pls-lab.org/en/Krivine_machine
+-- For a description of MachineFault Machines see this article
+-- https://www.pls-lab.org/en/MachineFault_machine
 
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
-import Data.Eq.Generic (genericEq)
-import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), maybe)
-import Data.Show.Generic (genericShow)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (LambdaF(..))
 import Machine.Closure (Closure(..), closure)
 import Machine.Context (class Context, binds, bound)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
+-- | A Machine is a non-empty Stack of Closures
+type Machine f var cat ctx = Cofree Maybe (Closure f var cat ctx)
+
+-- | A Machine either requires further evaluation or results in an element
+-- of the category Void of lambdas
+type MachineStep f var cat ctx = Step (Machine f var cat ctx) (cat Void)
+
+-- | A Machine can reach a fault condition in which the Krivine reduction
+-- rules do not have defined behaviour. That behaviour is defined by this class.
+class MachineFault f var cat ctx m where
+  contextFault :: Machine f var cat ctx -> var -> m (MachineStep f var cat ctx) 
+  stackFault :: Machine f var cat ctx -> m (MachineStep f var cat ctx) 
 
 -- | Evaluates of the Category `cat` over the Lambda calculus
 class Applicative m <= Evaluate f var cat m where
@@ -25,74 +34,58 @@ class Applicative m <= Evaluate f var cat m where
   -- | functor application
   functor :: cat (f (LambdaF var cat)) -> cat Void -> m (f (LambdaF var cat)) 
 
-
+-- | Transitions defined by evaluation of the category
 transition :: forall m f var cat ctx.
               MonadRec m
            => Context var (Closure f var cat ctx) ctx
            => Recursive (f (LambdaF var cat)) (LambdaF var cat)
            => Evaluate f var cat m
+           => MachineFault f var cat ctx m
            =>  cat (f (LambdaF var cat))
            -> Maybe (Machine f var cat ctx)
-           -> m (Step (Machine f var cat ctx) (Halt var cat))
-transition o Nothing = (Done <<< Halt) <$> thunk o
+           -> m (MachineStep f var cat ctx)
+transition o Nothing = Done <$> thunk o
 transition f (Just stack) = do
    let arg@(Closure (_ /\ ctx)) = head stack
    res <- evalUnbounded arg
-   case res of
-     Halt h -> do
-       aft <- functor f h
-       pure $ Loop ((closure aft ctx) :< tail stack)
-     err -> pure $ Done err
+   aft <- functor f res
+   pure $ Loop ((closure aft ctx) :< tail stack)
 
--- | A Machine is a non-empty Stack of Closures
-type Machine f var cat ctx = Cofree Maybe (Closure f var cat ctx)
-
--- | A Machine Halts either because of a fault in the Lambda calculus or
--- because a transition results in a halting condition
-data Halt var cat =
-    ContextFault var
-  | StackFault
-  | Halt (cat Void)
-
-derive instance Generic (Halt var cat) _
-instance (Show var, Show (cat Void)) => Show (Halt var cat) where
-  show = genericShow
-instance (Eq var, Eq (cat Void)) => Eq (Halt var cat) where
-  eq = genericEq
-
--- | A Krivine Machine Step
+-- | A MachineFault Machine Step
 -- Abs ~ pop, bind, and evaluate the body
 -- App ~ push the argument and evaluate the applied term
 -- Var ~ dereference the variable
 -- Cat ~ evaluate a state transition
-step :: forall f var cat ctx m .
+step :: forall f var cat ctx m.
         MonadRec m
      => Context var (Closure f var cat ctx) ctx
      => Recursive (f (LambdaF var cat)) (LambdaF var cat)
      => Evaluate f var cat m
-     => Machine f var cat ctx -> m (Step (Machine f var cat ctx) (Halt var cat))
+     => MachineFault f var cat ctx m
+     => Machine f var cat ctx -> m (MachineStep f var cat ctx)
 step machine = do
   let Closure (term /\ context) = head machine
   case project term of
     Abs var body ->
       case tail machine of
-        Nothing -> pure $ Done StackFault
+        Nothing -> stackFault machine
         Just stack -> do
           pure $ Loop $ (closure body (binds var (head stack) context)) :< tail stack 
     App f g ->
       pure $ Loop $ (closure f context) :< Just ((closure g context) :< tail machine)
     Var var -> do
       let continue closure = closure :< tail machine
-      pure $ maybe (Done $ ContextFault var) (Loop <<< continue) (bound var context)
+      maybe (contextFault machine var) (pure <<< Loop <<< continue) (bound var context)
     Cat c -> transition c (tail machine)
 
--- | Run a Krivine machine until a Halting condition is reached
+-- | Run a MachineFault machine until a Halting condition is reached
 runUnbounded :: forall f var cat ctx m .
                 MonadRec m
              => Context var (Closure f var cat ctx) ctx
              => Recursive (f (LambdaF var cat)) (LambdaF var cat)
              => Evaluate f var cat m
-             => Machine f var cat ctx -> m (Halt var cat)
+             => MachineFault f var cat ctx m
+             => Machine f var cat ctx -> m (cat Void)
 runUnbounded = tailRecM step
 
 
@@ -101,6 +94,7 @@ evalUnbounded :: forall f var cat ctx m .
               => Context var (Closure f var cat ctx) ctx
               => Recursive (f (LambdaF var cat)) (LambdaF var cat)
               => Evaluate f var cat m
-              => Closure f var cat ctx -> m (Halt var cat)
+              => MachineFault f var cat ctx m
+              => Closure f var cat ctx -> m (cat Void)
 evalUnbounded c = runUnbounded (c :< Nothing)
 

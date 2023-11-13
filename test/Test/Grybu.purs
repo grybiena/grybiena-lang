@@ -15,7 +15,7 @@ import Language.Lambda.Calculus (universe)
 import Language.Lambda.Inference (runInference)
 import Language.Lambda.Unification (rewrite, runUnification, unify)
 import Machine.Closure (closure)
-import Machine.Krivine (Halt(..), runUnbounded)
+import Machine.Krivine (runUnbounded)
 import Parsing (ParseError, runParserT)
 import Parsing.Indent (runIndent)
 import Parsing.String (eof)
@@ -160,7 +160,7 @@ testRun v h = test ("run (" <> v <> ")") do
     Left err -> Assert.assert ("parse error: " <> show err) false
     Right val -> do
       case runUnbounded (closure val Map.empty :< Nothing) of
-        res | res == Identity (Halt h) -> pure unit
+        res | res == Identity h -> pure unit
         res -> Assert.assert (show res) false
  
  
