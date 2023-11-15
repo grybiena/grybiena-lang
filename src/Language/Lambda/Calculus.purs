@@ -6,14 +6,14 @@ import Data.Eq (class Eq1, eq1)
 import Data.Foldable (class Foldable, foldMap, foldl, foldr)
 import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
-import Data.Maybe (Maybe, isJust, maybe)
+import Data.Maybe (Maybe(..), isJust, maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
-import Matryoshka.Class.Recursive (class Recursive)
+import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Fold (cata)
 import Prettier.Printer (DOC, text)
 
@@ -113,10 +113,16 @@ onVar :: forall var cat f .
         Eq var
      => Foldable cat
      => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
      => (var -> Maybe (f (LambdaF var cat)))
      -> Algebra (LambdaF var cat) (f (LambdaF var cat))
 onVar replacement =
   case _ of
+--    Abs v a ->
+--      case project <$> replacement v of
+--        Just (Var v') -> abs v' a
+--        Just _ -> a
+--        _ -> abs v a
     Abs v a | isJust (replacement v) -> a
     Abs v a -> abs v a
     Var v -> maybe (var v) identity (replacement v)

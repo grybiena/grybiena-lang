@@ -6,7 +6,7 @@ import Control.Alt ((<|>))
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Lazy (defer)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
-import Control.Monad.Rec.Class (Step(..))
+import Control.Monad.Rec.Class (class MonadRec, Step(..))
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate, (..))
 import Data.Either (Either(..))
@@ -15,6 +15,7 @@ import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
+import Data.Map (Map)
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
@@ -25,7 +26,7 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, rewrite, runUnification, unificationError, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, fresh, rewrite, runUnification, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
 import Machine.Krivine (class Evaluate, class MachineFault)
 import Matryoshka.Class.Recursive (project)
@@ -51,6 +52,8 @@ data TT m a =
   | TypeEffect
 
   -- Values
+
+  | BindEffect
   | TypeAnnotation a (Term m)
   | Native (Native m)
 
@@ -64,11 +67,13 @@ instance Show a => Show (TT m a) where
 instance Functor (TT m) where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
-  map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Bottom e) = Bottom e
   map _ TypeInt = TypeInt
   map _ TypeNumber = TypeNumber
   map _ TypeEffect = TypeEffect
+
+  map _ BindEffect = BindEffect
+  map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Native n) = Native n
 
 
@@ -109,11 +114,13 @@ instance PrettyLambda Var (TT m) where
   prettyApp f a = text "(" <+> pretty f <+> pretty a <+> text ")"
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
-  prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
   prettyCat (Bottom e) = text "Bottom" <+> text e
   prettyCat TypeInt = text "Int"
   prettyCat TypeNumber = text "Number"
   prettyCat TypeEffect = text "Effect" 
+  prettyCat BindEffect = text "bindEffect"
+
+  prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
   prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
 
 
@@ -136,7 +143,7 @@ parsePureEffect :: forall m n. Monad m => Monad n => ParserT String m (Term n)
 parsePureEffect = reserved "pureEffect" *> pure (cat $ Native pureE)
 
 parseBindEffect :: forall m n. Monad m => Bind n => ParserT String m (Term n)
-parseBindEffect = reserved "bindEffect" *> pure (cat $ Native bindE)
+parseBindEffect = reserved "bindEffect" *> pure (cat BindEffect) 
  
 parseNatives :: forall m n. Monad m => Array (String /\ Native n) -> ParserT String m (Term n)
 parseNatives = choice <<< map (uncurry parseNative)
@@ -254,10 +261,13 @@ instance
   unify a b = throwError $ unificationError (cat a) (cat b)
 
 instance 
-  ( Monad m
-  ) => MachineFault Mu Var (TT n) ctx m where
-  contextFault _ v = pure $ Done $ Bottom $ "Variable " <> prettyPrint v <> " not in scope."
-  stackFault _ = pure $ Done $ Bottom $ "StackFault."
+  ( MonadRec m
+  , Evaluate Mu Var (TT n) m
+  , MonadEffect m
+  ) => MachineFault Mu Var (TT n) Map m where
+  contextFault _ v = pure $ Done $ Bottom $ "Variable `" <> prettyPrint v <> "` not in scope."
+  stackFault _ _ = pure $ Done $ Bottom "Stack fault"
+  
 
 instance
   ( Monad m
@@ -266,19 +276,27 @@ instance
   ) => Inference Var (TT n) (Term n) m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
-  inference (TypeAnnotation v t) = do
-    (t' :: Cofree (LambdaF Var (TT n)) (Term n)) <- v
-    _ <- unify (t :: Term n) (head t' :: Term n)
-    pure (t :< tail t')
   inference (Bottom e) = pure (cat (Bottom e) :< Cat (Bottom e))
   inference TypeInt = pure $ (cat (Star 1) :< Cat TypeInt)
   inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
   inference TypeEffect = pure $ arrow (cat (Star 1)) (cat (Star 1)) :< Cat TypeEffect
+
+  inference (TypeAnnotation v t) = do
+    (t' :: Cofree (LambdaF Var (TT n)) (Term n)) <- v
+    _ <- unify (t :: Term n) (head t' :: Term n)
+    pure (t :< tail t')
+  inference BindEffect = do
+    va <- pure $ TypeVar "ta" -- fresh
+    vb <- pure $ TypeVar "tb" -- fresh
+    let a = var va
+        b = var vb 
+    pure $ abs va (abs vb (arrow (app (cat TypeEffect) a) (arrow (arrow a (app (cat TypeEffect) b)) (app (cat TypeEffect) b)))) :< Cat BindEffect
+
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
 instance
   ( Monad m
-  ) => Evaluate Mu Var (TT m) m where
+  ) => Evaluate Mu Var (TT n) m where
   thunk (Native n@(Purescript { nativeType, nativeTerm })) =
     case project nativeType of
       App (In (Cat TypeEffect)) ret -> do
@@ -292,19 +310,19 @@ instance
     case project nativeType of
       -- Value level lambda application
       App (In (App (In (Cat Arrow)) _)) ret -> 
-        case unwrap arg of
-          Just i ->
-            pure $ cat $ Native $ Purescript { nativeTerm: nativeTerm  i, nativeType: ret }
-          Nothing -> pure $ cat $ Bottom $ "Cannot unwrap `_ :: " <> prettyPrint nativeType <> "` to " <> show arg
+        case arg of
+          Native (Purescript argTerm) ->
+            pure $ cat $ Native $ Purescript { nativeTerm: nativeTerm argTerm.nativeTerm , nativeType: ret }
+          _ -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType <> "` to unwrappable " <> show arg
       -- Type level lambda application
       Abs v b -> do
          -- TODO maintain the unification context from when the program the machine is running was inferred
          -- (runUnification should be in m)
          let ret = fst $ runUnification do
-                     void $ unify (var v) (cat (unsafeCoerce arg) :: Term m)
+                     void $ unify (var v) (cat (unsafeCoerce arg) :: Term n)
                      rewrite b
          case ret of
-           Left (err :: UnificationError m) -> pure $ cat $ Bottom $ "Run-time type application error: " <> show err 
+           Left (err :: UnificationError n) -> pure $ cat $ Bottom $ "Run-time type application error: " <> show err 
            Right rew -> pure $ cat $ Native $ Purescript { nativeTerm: unsafeCoerce nativeTerm, nativeType: rew }
       _ -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType
   functor e _ = pure $ cat $ Bottom $ "Machine applied non-functor object: " <> show (const unit <$> e)
@@ -319,7 +337,7 @@ instance Eq (Native m) where
   eq (Purescript a) (Purescript b) = a.nativeType == b.nativeType && (a.nativeTerm :: String) == b.nativeTerm
 
 instance Show (Native m) where
-  show (Purescript { nativeType }) = "(_ :: " <> prettyPrint nativeType <> ")"
+  show (Purescript { nativeType, nativeTerm }) = "(" <> unsafeCoerce nativeTerm <> " :: " <> prettyPrint nativeType <> ")"
 
 unwrap :: forall m. (TT m) Void -> Maybe (forall a . a) 
 unwrap (Native (Purescript { nativeTerm })) = Just nativeTerm

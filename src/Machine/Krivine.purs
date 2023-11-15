@@ -25,7 +25,7 @@ type MachineStep f var cat ctx = Step (Machine f var cat ctx) (cat Void)
 -- rules do not have defined behaviour. That behaviour is defined by this class.
 class MachineFault f var cat ctx m where
   contextFault :: Machine f var cat ctx -> var -> m (MachineStep f var cat ctx) 
-  stackFault :: Machine f var cat ctx -> m (MachineStep f var cat ctx) 
+  stackFault :: var -> f (LambdaF var cat) -> m (MachineStep f var cat ctx) 
 
 -- | Evaluates of the Category `cat` over the Lambda calculus
 class Applicative m <= Evaluate f var cat m where
@@ -68,7 +68,7 @@ step machine = do
   case project term of
     Abs var body ->
       case tail machine of
-        Nothing -> stackFault machine
+        Nothing -> stackFault var body
         Just stack -> do
           pure $ Loop $ (closure body (binds var (head stack) context)) :< tail stack 
     App f g ->

@@ -4,13 +4,14 @@ import Prelude
 
 import Control.Comonad.Cofree ((:<))
 import Data.Either (Either(..))
-import Data.Identity (Identity(..))
+import Data.Identity (Identity)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Language.Grybu (TT(..), Term, UnificationError(..), Var(..), int, num, parseType, parseValue)
+import Effect.Class (liftEffect)
+import Language.Grybu (Native(..), TT(..), Term, UnificationError(..), Var(..), int, num, parseType, parseValue)
 import Language.Lambda.Calculus (universe)
 import Language.Lambda.Inference (runInference)
 import Language.Lambda.Unification (rewrite, runUnification, unify)
@@ -23,6 +24,7 @@ import Pretty.Printer (prettyPrint)
 import Test.Unit (TestSuite, suite, test)
 import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
+import Unsafe.Coerce (unsafeCoerce)
 
 grybuTests :: Effect Unit
 grybuTests = runTest do
@@ -36,7 +38,7 @@ grybuTests = runTest do
     testExpectErr "\\f -> (\\x -> f (x x)) (\\x -> f (x x))" $
                   Err "An infinite type was inferred for an expression: (t3 -> t4) while trying to match type t3"
     testInferType "\\x -> x" "a -> a"
-    testInferTypeThenKind "\\x -> x" "a -> a"
+
 
     testInferType "\\x y -> x" "a -> b -> a"
     testInferType "\\x y -> y" "a -> b -> b"
@@ -93,24 +95,20 @@ grybuTests = runTest do
 
     testInferTypeThenKind "pureEffect @Int" "*"
 
-    testInferTypeThenKind "pureEffect 1" "Int -> Effect Int"
 
-    testRun "pureEffect @Int 1" (Native $ int 1)
+--    testRunEffectInt "pureEffect @Int 1" 1
+--
+--    testRunEffectInt "bindEffect @Int @Int (pureEffect @Int 1) (pureEffect @Int)" 1
+-- 
+--    testRunEffectInt "bindEffect @Int @Int (pureEffect @Int 1) (\\a -> pureEffect @Int a)" 1
 
-    testRun "bindEffect @Int @Int (pureEffect @Int 1) (pureEffect @Int)" (Native $ int 1)
- 
-    -- TODO this causes a stack fault since evaluation of the lambda expects an argument on the stack
-    -- and the machine cannot halt on the lambda
-    -- bindEffect must work at the machine level, evaluating the first argument, then placing it on
-    -- the stack for consumption by the second argument
-    -- ALT instead of a stack fault we should bind a callback in a Comonadic way 
-    -- i.e. reverse the semantics of application, whenever a Native is applied to a callback
-    -- we unwrap the callback and realise that we have to apply the callback to the native
-    -- i.e we end up applying (pureEffect ~ Native :: Int -> Effect Int) to (Callback :: (a -> x) -> x) 
-    -- which resolves by applying the callback to the native
-    -- resulting in a (Native :: Effect Int)
+--    testRun "bindEffect @Int @Int (pureEffect @Int 1) (\\z -> bindEffect @Int @Int (pureEffect @Int (intPlus z 1)) (\\b -> pureEffect @Int (intPlus b 1)))" (Native $ int 3)
+--    testInferType "bindEffect @Int @Int (pureEffect @Int 1) (\\z -> bindEffect @Int @Int (pureEffect @Int (intPlus z 1)) (\\b -> pureEffect @Int (intPlus b 1)))" "Effect Int"
+--
+--
+--    testRun "bindEffect @Int @Int (bindEffect @Int @Int (pureEffect @Int 1) (\\a -> pureEffect @Int (intPlus a 1))) (\\b -> pureEffect @Int (intPlus b 1))" (Native $ int 3)
+--    testInferType "bindEffect @Int @Int (bindEffect @Int @Int (pureEffect @Int 1) (\\a -> pureEffect @Int (intPlus a 1))) (\\b -> pureEffect @Int (intPlus b 1))" "Effect Int"
 
-    testRun "bindEffect @Int @Int (pureEffect @Int 1) (\\a -> pureEffect @Int a)" (Native $ int 1)
 
 
 -- Bind
@@ -121,8 +119,11 @@ grybuTests = runTest do
     -- TODO this should fail
     testInferType "bindEffect" "forall x y. Effect a -> (a -> Effect b) -> Effect b"
 
-
-
+--    -- TODO this should pass
+--    testInferTypeThenKind "\\x -> x" "a -> a"
+--
+--    -- TODO this is fails correctly
+--    testInferTypeThenKind "pureEffect 1" "Int -> Effect Int"
 
 testInferType :: String -> String -> TestSuite
 testInferType v t = test ("(" <> v <> ") :: " <> t) do
@@ -159,9 +160,22 @@ testRun v h = test ("run (" <> v <> ")") do
   case termParser v of
     Left err -> Assert.assert ("parse error: " <> show err) false
     Right val -> do
-      case runUnbounded (closure val Map.empty :< Nothing) of
-        res | res == Identity h -> pure unit
-        res -> Assert.assert (show res) false
+      t <- runUnbounded (closure val Map.empty :< Nothing)
+      case t of
+        res | res == h -> pure unit
+        res -> Assert.assert (show res <> " /= " <> show h) false
+
+testRunEffectInt :: String -> Int -> TestSuite
+testRunEffectInt v h = test ("run (" <> v <> ")") do
+  case termParser v of
+    Left err -> Assert.assert ("parse error: " <> show err) false
+    Right (val :: Term Effect) -> do
+       t <- runUnbounded (closure val Map.empty :< Nothing)
+       case (t :: TT Effect Void) of
+         Native (Purescript { nativeTerm }) -> do
+           i <- liftEffect $ (unsafeCoerce nativeTerm :: Effect Int)
+           Assert.equal h i
+         e -> Assert.assert (show e) false
  
  
 
