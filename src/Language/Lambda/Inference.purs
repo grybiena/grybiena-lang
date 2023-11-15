@@ -7,7 +7,6 @@ import Control.Monad.Except (ExceptT)
 import Control.Monad.State (State)
 import Data.Either (Either)
 import Data.Foldable (class Foldable)
-import Data.Maybe (Maybe)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF(..), app, cat, var)
@@ -75,7 +74,7 @@ rule expr =
     Abs b a -> absRule b a  
     App f a -> join $ appRule <$> f <*> a
     Var v -> require v >>= \t -> pure (t :< Var v)
-    Cat c -> inference c
+    Cat c -> inference c 
 
 
 class Inference var cat typ m where
@@ -96,8 +95,7 @@ absRule binding inferBody = do
   assume binding tyBind
   tyBody <- inferBody
   tyBind' <- rewrite tyBind 
-  pure $ (arrow tyBind' (head tyBody)) :< (Abs binding tyBody)
-
+  pure $ (tyBind' :->: (head tyBody)) :< (Abs binding tyBody)
 
 appRule :: forall m typ var cat.
            Bind m
@@ -116,6 +114,7 @@ appRule f a = do
   let arrTy = head f
   case project arrTy of
     -- Applying a type level lambda (forall)
+    -- TODO this isn't the way to do that... 
     Abs v b -> do
       let argTy = flat a
       _ <- unify (var v) argTy
@@ -131,7 +130,7 @@ appRule f a = do
         unifyWithArrow t = do
            argTy <- fresh
            retTy <- fresh
-           _ <- unify (arrow argTy retTy) t     
+           _ <- unify (argTy :->: retTy) t     
            Tuple <$> rewrite argTy <*> rewrite retTy
 
 flat :: forall typ var cat.
@@ -147,6 +146,8 @@ flat c = embed (flat <$> tail c)
 
 class Arrow typ where
   arrow :: typ -> typ -> typ
+
+infixr 5 arrow as :->:
 
 class ArrowObject cat where
   arrowObject :: cat 
@@ -208,3 +209,4 @@ elab :: forall f var cat .
      => (Unit -> Elaboration f var cat /\ LambdaF var cat (Cofree (LambdaF var cat) (Elaboration f var cat)))
      -> Elaboration f var cat
 elab i = embed (deferCofree i)
+

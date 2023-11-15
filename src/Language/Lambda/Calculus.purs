@@ -74,6 +74,31 @@ instance Traversable cat => Traversable (LambdaF var cat) where
   sequence = traverse identity
 
 
+freeIn :: forall var cat f .
+            Ord var
+         => Foldable cat
+         => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+         => var -> f (LambdaF var cat) -> Boolean
+freeIn v expr = v `Set.member` free expr
+
+
+free :: forall var cat f .
+        Ord var
+     => Foldable cat
+     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+     => f (LambdaF var cat) -> Set var
+free = cata freeVars 
+
+
+freeVars :: forall var cat .
+        Ord var
+     => Foldable cat
+     => Algebra (LambdaF var cat) (Set var)
+freeVars (Abs v a) = Set.delete v a
+freeVars (Var v) = Set.singleton v
+freeVars (App a b) = a `Set.union` b 
+freeVars (Cat c) = foldr Set.union Set.empty c
+
 occursIn :: forall var cat f .
             Ord var
          => Foldable cat
@@ -81,22 +106,21 @@ occursIn :: forall var cat f .
          => var -> f (LambdaF var cat) -> Boolean
 occursIn v expr = v `Set.member` universe expr
 
-
 universe :: forall var cat f .
             Ord var
          => Foldable cat
          => Recursive (f (LambdaF var cat)) (LambdaF var cat)
          => f (LambdaF var cat) -> (Set var)
-universe = cata vars
+universe = cata allVars
 
-vars :: forall var cat .
+allVars :: forall var cat .
         Ord var
      => Foldable cat
      => Algebra (LambdaF var cat) (Set var)
-vars (Abs v a) = Set.insert v a
-vars (Var v) = Set.singleton v
-vars (App a b) = a `Set.union` b 
-vars (Cat c) = foldr Set.union Set.empty c
+allVars (Abs v a) = Set.insert v a
+allVars (Var v) = Set.singleton v
+allVars (App a b) = a `Set.union` b 
+allVars (Cat c) = foldr Set.union Set.empty c
 
 replace :: forall var cat f .
            Eq var

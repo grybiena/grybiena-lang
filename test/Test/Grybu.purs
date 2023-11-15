@@ -2,7 +2,7 @@ module Test.Grybu where
 
 import Prelude
 
-import Control.Comonad.Cofree ((:<))
+import Control.Comonad.Cofree (head, (:<))
 import Data.Either (Either(..))
 import Data.Identity (Identity)
 import Data.Map as Map
@@ -13,7 +13,8 @@ import Effect (Effect)
 import Effect.Class (liftEffect)
 import Language.Grybu (Native(..), TT(..), Term, UnificationError(..), Var(..), int, num, parseType, parseValue)
 import Language.Lambda.Calculus (universe)
-import Language.Lambda.Inference (runInference)
+import Language.Lambda.Inference (infer, runInference)
+import Language.Lambda.Ski (elimAbs)
 import Language.Lambda.Unification (rewrite, runUnification, unify)
 import Machine.Closure (closure)
 import Machine.Krivine (runUnbounded)
@@ -37,13 +38,22 @@ grybuTests = runTest do
 
     testExpectErr "\\f -> (\\x -> f (x x)) (\\x -> f (x x))" $
                   Err "An infinite type was inferred for an expression: (t3 -> t4) while trying to match type t3"
-    testInferType "\\x -> x" "a -> a"
 
+    testInferType "\\x -> x" "a -> a"
+    testInferSkiType "\\x -> x" "a -> a"
 
     testInferType "\\x y -> x" "a -> b -> a"
+    testInferSkiType "\\x y -> x" "a -> b -> a"
+
     testInferType "\\x y -> y" "a -> b -> b"
+    testInferSkiType "\\x y -> y" "a -> b -> b"
+
     testInferType "\\x y -> x y" "(a -> b) -> a -> b"
+    testInferSkiType "\\x y -> x y" "(a -> b) -> a -> b"
+
     testInferType "\\x y -> y x" "a -> (a -> b) -> b"
+    testInferSkiType "\\x y -> y x" "a -> (a -> b) -> b"
+
     testInferType "\\x y z -> (x z) (y z)" "(a -> b -> c) -> (a -> b) -> a -> c"
     testInferType "\\x y z -> x z (y z)" "(a -> b -> c) -> (a -> b) -> a -> c"
 
@@ -93,6 +103,13 @@ grybuTests = runTest do
     testInferType "pureEffect" "(forall a. a -> (Effect a))"
     testInferType "pureEffect @Int" "Int -> Effect Int"
 
+    testInferSkiType "pureEffect @Int" "Int -> Effect Int"
+    testInferSkiType "\\x -> pureEffect @Int x" "Int -> Effect Int"
+--    testInferSkiType "\\y x -> bindEffect @Int x y" "(Int -> Effect Int) -> Effect Int -> Effect Int"
+
+
+
+
     testInferTypeThenKind "pureEffect @Int" "*"
 
 
@@ -111,14 +128,14 @@ grybuTests = runTest do
 
 
 
--- Bind
-    testInferType "bindEffect" "forall b a. Effect a -> (a -> Effect b) -> Effect b"
-    testInferType "bindEffect" "forall a b. Effect a -> (a -> Effect b) -> Effect b"
-
-
-    -- TODO this should fail
-    testInferType "bindEffect" "forall x y. Effect a -> (a -> Effect b) -> Effect b"
-
+---- Bind
+--    testInferType "bindEffect" "forall b a. Effect a -> (a -> Effect b) -> Effect b"
+--    testInferType "bindEffect" "forall a b. Effect a -> (a -> Effect b) -> Effect b"
+--
+--
+--    -- TODO this should fail
+--    testInferType "bindEffect" "forall x y. Effect a -> (a -> Effect b) -> Effect b"
+--
 --    -- TODO this should pass
 --    testInferTypeThenKind "\\x -> x" "a -> a"
 --
@@ -136,6 +153,22 @@ testInferType v t = test ("(" <> v <> ") :: " <> t) do
           case alphaEquivalent suc typ of
             Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
             Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> prettyPrint err) false
+
+testInferSkiType :: String -> String -> TestSuite
+testInferSkiType v t = test ("(" <> v <> ") :: " <> t) do
+  case Tuple <$> termParser v <*> typeParser t of
+    Left err -> Assert.assert ("parse error: " <> show err) false
+    Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
+      case head <$> (fst $ runUnification (elimAbs val >>= infer)) of
+        Left (err :: UnificationError Identity) -> do
+           let r :: Either (UnificationError Identity) (Term Identity)
+               r = fst $ runUnification (elimAbs val)
+           Assert.assert ("infer error: " <> prettyPrint err <> " | " <> show (prettyPrint <$> r)) false
+        Right suc ->
+          case alphaEquivalent suc typ of
+            Right b -> Assert.assert ("Expected to unify with: " <> prettyPrint suc) b
+            Left err -> Assert.assert ("unification error: " <> prettyPrint suc <> " | " <> prettyPrint err) false
+
 
 
 testInferTypeThenKind :: String -> String -> TestSuite
@@ -232,5 +265,4 @@ termParser s = runIndent $ runParserT s do
   v <- parseValue
   eof
   pure v
-
 

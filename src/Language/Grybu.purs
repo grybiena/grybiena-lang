@@ -20,12 +20,14 @@ import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
+import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (fst, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, arrow)
+import Language.Lambda.Inference (class ArrowObject, class Inference, arrow, (:->:))
+import Language.Lambda.Ski (class SKI)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, fresh, rewrite, runUnification, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
 import Machine.Krivine (class Evaluate, class MachineFault)
@@ -76,6 +78,17 @@ instance Functor (TT m) where
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Native n) = Native n
 
+instance Traversable (TT m) where
+  traverse _ Arrow = pure Arrow
+  traverse _ (Star i) = pure (Star i)
+  traverse _ (Bottom e) = pure (Bottom e)
+  traverse _ TypeInt = pure TypeInt
+  traverse _ TypeNumber = pure TypeNumber
+  traverse _ TypeEffect = pure TypeEffect
+  traverse _ BindEffect = pure BindEffect
+  traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> (f a)
+  traverse _ (Native n) = pure (Native n)
+  sequence = traverse identity
 
 instance Eq a => Eq (TT m a) where
   eq = genericEq
@@ -292,7 +305,7 @@ instance
         b = var vb 
     pure $ abs va (abs vb (arrow (app (cat TypeEffect) a) (arrow (arrow a (app (cat TypeEffect) b)) (app (cat TypeEffect) b)))) :< Cat BindEffect
 
-  inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
+  inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Bottom $ show (prettyPrint n.nativeType)) -- (Native (Purescript n))
 
 instance
   ( Monad m
@@ -366,6 +379,43 @@ logInt = native prim
   where
     prim :: Int -> m Int
     prim a = liftEffect (log (show a)) *> pure 0
+
+instance
+  ( Monad n
+  , Fresh Var n
+  ) => SKI (TT m) n where
+  skiS = do
+    a <- fresh
+    b <- fresh
+    c <- fresh
+    pure $ Native $ Purescript
+      { nativeType: ((var a :->: var b :->: var c) :->: (var a :->: var b) :->: var a :->: var c)
+      , nativeTerm:
+          let prim :: forall a b c. (a -> b -> c) -> (a -> b) -> a -> c 
+              prim x y z = x z (y z)
+           in unsafeCoerce prim
+      }
+  skiK = do
+    a <- fresh
+    b <- fresh
+    pure $ Native $ Purescript
+      { nativeType: (var a :->: var b :->: var a)
+      , nativeTerm:
+          let prim :: forall a b. a -> b -> a
+              prim = const
+           in unsafeCoerce prim
+      }
+  skiI = do
+    a <- fresh
+    pure $ Native $ Purescript
+      { nativeType: (var a :->: var a)
+      , nativeTerm:
+          let prim :: forall a. a -> a
+              prim = identity
+           in unsafeCoerce prim
+      }
+
+
 
 pureE :: forall m. Applicative m => Native m
 pureE = Purescript
