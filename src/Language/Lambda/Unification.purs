@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.Except.Trans (class MonadThrow)
-import Control.Monad.State (class MonadState, State, get, modify, modify_, runState)
+import Control.Monad.State (class MonadState, State, StateT, get, modify, modify_, runState, runStateT)
 import Data.Either (Either)
 import Data.Foldable (class Foldable)
 import Data.Map (Map)
@@ -91,6 +91,16 @@ type TypingContext var f var' cat' =
   , typingAssumptions :: Map var (f (LambdaF var' cat')) 
   , currentSubstitution :: Map var' (f (LambdaF var' cat'))
   }
+
+
+runUnificationT :: forall var f var' cat' err a m.
+                  ExceptT err (StateT (TypingContext var f var' cat') m) a
+               ->  m (Either err a /\ TypingContext var f var' cat')
+runUnificationT = flip runStateT { nextVar: 0
+                               , typingAssumptions: Map.empty
+                               , currentSubstitution: Map.empty
+                               } <<< runExceptT
+
 
 runUnification :: forall var f var' cat' err a.
                   ExceptT err (State (TypingContext var f var' cat')) a

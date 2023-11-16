@@ -5,6 +5,7 @@ import Prelude
 import Control.Alt ((<|>))
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Lazy (defer)
+import Control.Monad.Cont (lift)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Rec.Class (class MonadRec, Step(..))
 import Control.Monad.State (class MonadState)
@@ -26,7 +27,7 @@ import Data.Tuple.Nested (type (/\), (/\))
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, arrow, (:->:))
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, (:->:))
 import Language.Lambda.Ski (class SKI)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, fresh, rewrite, runUnification, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
@@ -55,7 +56,6 @@ data TT m a =
 
   -- Values
 
-  | BindEffect
   | TypeAnnotation a (Term m)
   | Native (Native m)
 
@@ -65,6 +65,10 @@ instance Show a => Show (TT m a) where
   show (TypeAnnotation a t) = "TypeAnnotation " <> show a <> " " <> show t
   show e = genericShow e
 
+instance IsStar Mu Var (TT m) where
+  isStar t = case project t of
+               Cat (Star _) -> true
+               _ -> false
 
 instance Functor (TT m) where
   map _ Arrow = Arrow
@@ -74,7 +78,6 @@ instance Functor (TT m) where
   map _ TypeNumber = TypeNumber
   map _ TypeEffect = TypeEffect
 
-  map _ BindEffect = BindEffect
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Native n) = Native n
 
@@ -85,7 +88,6 @@ instance Traversable (TT m) where
   traverse _ TypeInt = pure TypeInt
   traverse _ TypeNumber = pure TypeNumber
   traverse _ TypeEffect = pure TypeEffect
-  traverse _ BindEffect = pure BindEffect
   traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> (f a)
   traverse _ (Native n) = pure (Native n)
   sequence = traverse identity
@@ -131,16 +133,15 @@ instance PrettyLambda Var (TT m) where
   prettyCat TypeInt = text "Int"
   prettyCat TypeNumber = text "Number"
   prettyCat TypeEffect = text "Effect" 
-  prettyCat BindEffect = text "bindEffect"
 
   prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
   prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
 
 
-parseValue :: forall m n. Monad m => Monad n => ParserT String m (Term n)
+parseValue :: forall m n. Monad m => Fresh Var m => Monad n => ParserT String m (Term n)
 parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
 
-parseValueAtom :: forall m n. Monad m => Monad n => ParserT String m (Term n)
+parseValueAtom :: forall m n. Monad m => Fresh Var m => Monad n => ParserT String m (Term n)
 parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> parsePureEffect <|> parseBindEffect <|> parseTypeLit <|> (parens parseValue)
 
 parseTypeLit :: forall m n. Monad m => ParserT String m (Term n)
@@ -152,11 +153,11 @@ parseNumeric = (try parseNumber) <|> parseInt
 parseInt :: forall m n. Monad m => ParserT String m (Term n)
 parseInt = cat <<< Native <<< native <$> integer
  
-parsePureEffect :: forall m n. Monad m => Monad n => ParserT String m (Term n)
-parsePureEffect = reserved "pureEffect" *> pure (cat $ Native pureE)
+parsePureEffect :: forall m n. Monad m => Monad n => Fresh Var m => ParserT String m (Term n)
+parsePureEffect = reserved "pureEffect" *> (cat <<< Native <$> lift pureE)
 
-parseBindEffect :: forall m n. Monad m => Bind n => ParserT String m (Term n)
-parseBindEffect = reserved "bindEffect" *> pure (cat BindEffect) 
+parseBindEffect :: forall m n. Monad m => Fresh Var m => Bind n => ParserT String m (Term n)
+parseBindEffect = reserved "bindEffect" *> (cat <<< Native <$> lift bindE)
  
 parseNatives :: forall m n. Monad m => Array (String /\ Native n) -> ParserT String m (Term n)
 parseNatives = choice <<< map (uncurry parseNative)
@@ -173,12 +174,12 @@ parseTypeAnnotation v = do
   t <- parseType
   pure $ cat $ TypeAnnotation v t
  
-parseAbs :: forall m n. Monad m => Monad n => ParserT String m (Term n)
+parseAbs :: forall m n. Monad m => Fresh Var m => Monad n => ParserT String m (Term n)
 parseAbs = absMany <$> parsePats <*> parseValue
   where
     parsePats = reservedOp "\\" *> many1Till (TermVar <$> identifier) (reservedOp "->")
 
-parseApp :: forall m n. Monad m => Monad n => (Term n) -> ParserT String m (Term n)
+parseApp :: forall m n. Monad m => Fresh Var m => Monad n => (Term n) -> ParserT String m (Term n)
 parseApp v = app v <$> parseValueAtom
 
 parseType :: forall m n. Monad m => ParserT String m (Term n)
@@ -298,13 +299,6 @@ instance
     (t' :: Cofree (LambdaF Var (TT n)) (Term n)) <- v
     _ <- unify (t :: Term n) (head t' :: Term n)
     pure (t :< tail t')
-  inference BindEffect = do
-    va <- pure $ TypeVar "ta" -- fresh
-    vb <- pure $ TypeVar "tb" -- fresh
-    let a = var va
-        b = var vb 
-    pure $ abs va (abs vb (arrow (app (cat TypeEffect) a) (arrow (arrow a (app (cat TypeEffect) b)) (app (cat TypeEffect) b)))) :< Cat BindEffect
-
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Bottom $ show (prettyPrint n.nativeType)) -- (Native (Purescript n))
 
 instance
@@ -417,31 +411,32 @@ instance
 
 
 
-pureE :: forall m. Applicative m => Native m
-pureE = Purescript
-  { -- TODO generate fresh type variables when parsing
-    nativeType: abs (TypeVar "a") (arrow (var (TypeVar "a")) (app (cat TypeEffect) (var (TypeVar "a")))) 
-  , nativeTerm:
-      let prim :: forall a. a -> m a
-          prim = pure
-       in unsafeCoerce prim
-  }
+pureE :: forall n m. Monad m => Fresh Var m => Applicative n => m (Native n)
+pureE = do
+  a <- fresh
+  pure $ Purescript
+    { nativeType: abs a $ var a :->: (app (cat TypeEffect) (var a))
+    , nativeTerm:
+        let prim :: forall a. a -> m a
+            prim = pure
+         in unsafeCoerce prim
+    }
  
-bindE :: forall m. Bind m => Native m
-bindE = Purescript
-  { -- TODO generate fresh type variables when parsing
-    nativeType:
-      let va = TypeVar "a"
-          a = var va
-          vb = TypeVar "b"
-          b = var vb 
-       in abs va (abs vb (arrow (app (cat TypeEffect) a) (arrow (arrow a (app (cat TypeEffect) b)) (app (cat TypeEffect) b))))
-  , nativeTerm:
-      let prim :: forall a b. m a -> (a -> m b) -> m b
-          prim = (>>=)
-       in unsafeCoerce prim
-  }
- 
+bindE :: forall n m. Monad m => Fresh Var m => Bind n => m (Native n)
+bindE = do
+  a <- fresh
+  b <- fresh
+  pure $ Purescript
+    { nativeType: absMany [a,b]
+                $ (app (cat TypeEffect) (var a))
+             :->: (var a :->: (app (cat TypeEffect) (var b)))
+             :->: (app (cat TypeEffect) (var b))
+    , nativeTerm:
+        let prim :: forall a b. m a -> (a -> m b) -> m b
+            prim = (>>=)
+         in unsafeCoerce prim
+    }
+   
 
 natives :: forall m. Reifies m m => MonadEffect m =>  Array (String /\ Native m)
 natives =

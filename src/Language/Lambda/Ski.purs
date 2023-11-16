@@ -1,5 +1,7 @@
 module Language.Lambda.Ski where
 
+-- https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis
+
 import Prelude
 
 import Data.Traversable (class Traversable, traverse)
@@ -7,7 +9,7 @@ import Language.Lambda.Calculus (LambdaF(..), abs, app, cat, freeIn, var)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
-
+-- TODO extend to reduce to C and B combinators 
 elimAbs :: forall f var cat m.
           Recursive (f (LambdaF var cat)) (LambdaF var cat) 
        => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 

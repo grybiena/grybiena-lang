@@ -28,7 +28,7 @@ runInference :: forall exp var cat err t.
      => Inference var cat (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
      => Enumerable var
      => Ord var
-     => Ord var
+     => IsType (t (LambdaF var cat))
      => Foldable cat
      => NotInScopeError var err
      => InfiniteTypeError var (t (LambdaF var cat)) err 
@@ -44,6 +44,7 @@ runInference v = head <$> (fst $ runUnification (infer v))
 
 infer :: forall exp var cat m typ .
         Monad m
+     => IsType typ
      => Functor cat
      => Recursive exp (LambdaF var cat)
      => Fresh typ m
@@ -59,6 +60,7 @@ infer = cata rule
 
 rule :: forall var cat m typ .
         Monad m
+     => IsType typ
      => Functor cat
      => Fresh typ m
      => Context var typ m
@@ -97,8 +99,18 @@ absRule binding inferBody = do
   tyBind' <- rewrite tyBind 
   pure $ (tyBind' :->: (head tyBody)) :< (Abs binding tyBody)
 
+class IsStar f var cat where
+  isStar :: f (LambdaF var cat) -> Boolean
+
+instance IsStar f var cat => IsType (f (LambdaF var cat)) where
+  isType = isStar
+
+class IsType typ where
+  isType :: typ -> Boolean
+
 appRule :: forall m typ var cat.
            Bind m
+        => IsType typ
         => Functor cat
         => Unification typ m
         => Applicative m
@@ -112,26 +124,26 @@ appRule :: forall m typ var cat.
         -> m (Cofree (LambdaF var cat) typ)
 appRule f a = do
   let arrTy = head f
+      argTy = head a
   case project arrTy of
     -- Applying a type level lambda (forall)
-    -- TODO this isn't the way to do that... 
-    Abs v b -> do
-      let argTy = flat a
-      _ <- unify (var v) argTy
+    Abs v b | isType argTy -> do
+      let argLit = flat a
+      _ <- unify (var v) argLit
       tyApp <- rewrite b
       pure $ tyApp :< App f a
     -- Applying a term level arrow (a -> b)
     _ -> do
       arrArg /\ arrRet <- unifyWithArrow arrTy
-      let argTy = head a
       void $ unify arrArg argTy
-      pure $ arrRet :< (App f a)
+      arrRet' <- rewrite arrRet
+      pure $ arrRet' :< (App f a)
       where
         unifyWithArrow t = do
-           argTy <- fresh
+           argTy' <- fresh
            retTy <- fresh
-           _ <- unify (argTy :->: retTy) t     
-           Tuple <$> rewrite argTy <*> rewrite retTy
+           _ <- unify (argTy' :->: retTy) t     
+           Tuple <$> rewrite argTy' <*> rewrite retTy
 
 flat :: forall typ var cat.
         Functor cat

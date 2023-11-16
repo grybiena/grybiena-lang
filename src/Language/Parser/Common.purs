@@ -2,58 +2,78 @@ module Language.Parser.Common where
 
 import Prelude
 
-import Data.Identity (Identity(..))
+import Control.Alt ((<|>))
 import Data.List (List)
 import Data.Maybe (Maybe(..))
-import Parsing (ParserT, mapParserT)
+import Parsing (ParserT)
 import Parsing.Combinators (choice, optionMaybe)
 import Parsing.Indent (IndentParser)
-import Parsing.Language (haskellStyle)
+import Parsing.String.Basic (alphaNum, letter, oneOf)
 import Parsing.Token (GenLanguageDef(..), GenTokenParser, makeTokenParser)
 
 type Parser a = IndentParser String a
+
+type LanguageDef m = GenLanguageDef String m
+
+languageDef :: forall m . LanguageDef m
+languageDef = LanguageDef 
+  { commentStart: "{-"
+  , commentEnd: "-}"
+  , commentLine: "--"
+  , nestedComments: true
+  , identStart: letter
+  , identLetter: alphaNum <|> oneOf [ '_', '\'' ]
+  , opStart: op'
+  , opLetter: op'
+  , reservedOpNames
+  , reservedNames
+  , caseSensitive: true
+  }
+  where
+  op' :: ParserT String m Char
+  op' = oneOf [ ':', '!', '#', '$', '%', '&', '*', '+', '.', '/', '<', '=', '>', '?', '@', '\\', '^', '|', '-', '~' ]
+  reservedOpNames =  [ "=", "::", ",", ".", "\\", "->"]
+  reservedNames = [ "forall", "type", "data", "String", "Int", "Number", "Effect", "_", "intPlus", "numPlus", "pureEffect", "bindEffect"]
+
  
-tokenParser :: GenTokenParser String Identity 
-tokenParser = makeTokenParser (let LanguageDef def = haskellStyle
-                                in LanguageDef (def { reservedOpNames = [ "=", "::", ",", ".", "\\", "->"]
-                                , reservedNames = [ "forall", "type", "data", "String", "Int", "Number", "Effect", "_", "intPlus", "numPlus", "pureEffect", "bindEffect"]
-                                                    }))
+tokenParser :: forall m. GenTokenParser String m 
+tokenParser = makeTokenParser languageDef
 
 integer :: forall m . Monad m => ParserT String m Int
-integer = mapParserT (\(Identity r) -> pure r) tokenParser.integer 
+integer = tokenParser.integer 
 
 number :: forall m . Monad m => ParserT String m Number
-number = mapParserT (\(Identity r) -> pure r) tokenParser.float
+number = tokenParser.float
 
 reservedOp :: forall m. Monad m => String -> ParserT String m Unit
-reservedOp s = mapParserT (\(Identity r) -> pure r) (tokenParser.reservedOp s)
+reservedOp = tokenParser.reservedOp
 
-commaSep :: forall m a. Monad m => ParserT String Identity a -> ParserT String m (List a)
-commaSep s = mapParserT (\(Identity r) -> pure r) (tokenParser.commaSep s)
+commaSep :: forall m a. Monad m => ParserT String m a -> ParserT String m (List a)
+commaSep = tokenParser.commaSep
 
 reserved :: forall m. Monad m => String -> ParserT String m Unit
-reserved s = mapParserT (\(Identity r) -> pure r) (tokenParser.reserved s)
+reserved = tokenParser.reserved
 
 identifier :: forall m. Monad m => ParserT String m String
-identifier = mapParserT (\(Identity r) -> pure r) tokenParser.identifier
+identifier = tokenParser.identifier
 
 operator :: forall m. Monad m => ParserT String m String
-operator = mapParserT (\(Identity r) -> pure r) tokenParser.operator
+operator = tokenParser.operator
 
 stringLiteral :: forall m. Monad m => ParserT String m String
-stringLiteral = mapParserT (\(Identity r) -> pure r) tokenParser.stringLiteral
+stringLiteral = tokenParser.stringLiteral
 
-lexeme :: forall m a. Monad m => ParserT String Identity a -> ParserT String m a
-lexeme s = mapParserT (\(Identity r) -> pure r) (tokenParser.lexeme s)
+lexeme :: forall m a. Monad m => ParserT String m a -> ParserT String m a
+lexeme = tokenParser.lexeme
 
-brackets :: forall m a. Monad m => ParserT String Identity a -> ParserT String m a
-brackets s = mapParserT (\(Identity r) -> pure r) (tokenParser.brackets s)
+brackets :: forall m a. Monad m => ParserT String m a -> ParserT String m a
+brackets = tokenParser.brackets
 
-braces :: forall m a. Monad m => ParserT String Identity a -> ParserT String m a
-braces s = mapParserT (\(Identity r) -> pure r) (tokenParser.braces s)
+braces :: forall m a. Monad m => ParserT String m a -> ParserT String m a
+braces = tokenParser.braces
 
-parens :: forall m a. Monad m => ParserT String Identity a -> ParserT String m a
-parens s = mapParserT (\(Identity r) -> pure r) (tokenParser.parens s)
+parens :: forall m a. Monad m => ParserT String m a -> ParserT String m a
+parens = tokenParser.parens
 
 
 ---
