@@ -133,10 +133,20 @@ grybuTests = runTest do
     testInferType "pureEffect @Int" "(Int -> ( Effect Int ))"
     testInferSkiType "pureEffect @Int" "(Int -> ( Effect Int ))"
 
-    -- TODO skolemize the variables bound by the forall within unify
-    testInferType "\\x -> pureEffect x" "forall t1 . (t1 -> ( Effect t1 ))"
+    -- skolemizing removes the forall, encoding its scope into the type variables 
+    testInferType "\\x -> pureEffect x" "(t2 -> ( Effect t2 ))"
     -- This works by eta reduction
     testInferSkiType "\\x -> pureEffect x" "forall t1 . (t1 -> ( Effect t1 ))"
+
+    -- application to a term with a concrete type infers the universally quantified type variable
+    testInferType "(\\x -> pureEffect x) 1" "( Effect Int )"
+    testInferSkiType "(\\x -> pureEffect x) 1" "( Effect Int )"
+
+    -- application to a type annotation can be used to explicitly infer the type 
+    testInferType "(\\x -> pureEffect @Int x) 1" "( Effect Int )"
+    testInferSkiType "(\\x -> pureEffect @Int x) 1" "( Effect Int )"
+
+
 
     testInferType "bindEffect @Int @Int"  "(( Effect Int ) -> ((Int -> ( Effect Int )) -> ( Effect Int )))"
     testInferSkiType "bindEffect @Int @Int"  "(( Effect Int ) -> ((Int -> ( Effect Int )) -> ( Effect Int )))"

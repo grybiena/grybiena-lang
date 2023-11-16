@@ -54,9 +54,21 @@ class UnificationError typ err where
 class InfiniteTypeError var typ err where
   infiniteTypeError :: var -> typ -> err
 
+newtype Skolem = Skolem Int
+derive newtype instance Show Skolem
+derive newtype instance Ord Skolem
+derive newtype instance Eq Skolem
+
+instance Enumerable Skolem where
+  fromInt = Skolem
+
+class Skolemize f var cat where
+  skolemize :: var -> Skolem -> f (LambdaF var cat) -> f (LambdaF var cat)
+
 instance
   ( Monad m
-  , Fresh var m 
+  , Fresh Int m 
+  , Fresh var m
   , Eq var
   , Substitute var cat f m 
   , Rewrite (f (LambdaF var cat)) m 
@@ -65,6 +77,7 @@ instance
   , Unify (cat (f (LambdaF var cat))) (cat (f (LambdaF var cat))) m
   , Unify var (f (LambdaF var cat)) m
   , UnificationError (f (LambdaF var cat)) err
+  , Skolemize f var cat
   , MonadThrow err m
   ) => Unify (f (LambdaF var cat)) (f (LambdaF var cat)) m where
   unify ta tb = do
@@ -82,6 +95,11 @@ instance
          br <- rewrite ba
          unify ar br
        -- TODO skolemize Abs and unify with any arbitrary type
+       Abs ab aa /\ _ -> do
+         sko <- fresh
+         let ska = skolemize ab sko aa
+         unify ska tb
+       _ /\ Abs _ _ -> unify tb ta
        App ab aa /\ App bb ba -> do
          unify ab bb *> unify aa ba
        Cat ca /\ Cat cb -> unify ca cb
@@ -127,7 +145,8 @@ instance
   fresh = var <<< fromInt <$> fresh
 else
 instance
-  ( MonadState (TypingContext var f var' cat') m 
+  ( Monad m
+  , Fresh Int m
   , Enumerable var'
   ) => Fresh var' m where
   fresh = fromInt <$> fresh
@@ -156,6 +175,7 @@ instance
   ( Ord var'
   , Foldable cat'
   , Fresh var' m
+  , Skolemize f var' cat'
   , MonadState (TypingContext var f var' cat') m
   , Recursive (f (LambdaF var' cat')) (LambdaF var' cat')
   , Corecursive (f (LambdaF var' cat')) (LambdaF var' cat')

@@ -26,10 +26,10 @@ import Data.Tuple (fst, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, replace, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class Shadow, arrow, (:->:))
 import Language.Lambda.Ski (class SKI)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class UnificationError, class Unify, TypingContext, fresh, fromInt, rewrite, runUnification, substitute, unificationError, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem(..), TypingContext, fresh, fromInt, rewrite, runUnification, substitute, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
 import Machine.Krivine (class Evaluate, class MachineFault)
 import Matryoshka.Class.Recursive (project)
@@ -92,6 +92,10 @@ instance Traversable (TT m) where
   traverse _ (Native n) = pure (Native n)
   sequence = traverse identity
 
+instance Skolemize Mu Var (TT m) where
+  skolemize (Scoped i s) k = replace (\x -> if x == Ident i then Just (var (Skolemized i s k)) else Nothing) 
+  skolemize _ _ = identity
+
 instance Eq a => Eq (TT m a) where
   eq = genericEq
 
@@ -107,11 +111,6 @@ newtype Scope = Scope Int
 derive newtype instance Show Scope
 derive newtype instance Ord Scope
 derive newtype instance Eq Scope
-
-newtype Skolem = Skolem Int
-derive newtype instance Show Skolem
-derive newtype instance Ord Skolem
-derive newtype instance Eq Skolem
 
 
 data Var =
@@ -309,22 +308,24 @@ instance UnificationError (Term m) (UnificationError m) where
 instance
   ( MonadThrow (UnificationError n) m
   , Fresh Var m
+  , Skolemize Mu Var (TT n)
   , MonadState (TypingContext Var Mu Var (TT n)) m
   ) => Unify Var (Term n) m where
   unify v@(Ident i) t =
     case project t of
       Var (Ident j) | i == j -> pure unit
-      e -> substitute v t
+      _ -> substitute v t
   unify v@(Skolemized _ _ i) t =
     case project t of
       Var (Skolemized _ _ j) | i == j -> pure unit
-      e -> throwError $ unificationError (var v) t
+      _ -> throwError $ unificationError (var v) t
   unify v t = throwError $ unificationError (var v) t
 
 
 instance
   ( MonadThrow (UnificationError n) m
   , Fresh Var m
+  , Skolemize Mu Var (TT n)
   , MonadState (TypingContext Var Mu Var (TT n)) m
   ) => Unify (TT n (Term n)) (TT n (Term n)) m where
   unify Arrow Arrow = pure unit
@@ -370,6 +371,7 @@ instance
 
 instance
   ( Monad m
+  , Skolemize Mu Var (TT n)
   ) => Evaluate Mu Var (TT n) m where
   thunk (Native n@(Purescript { nativeType, nativeTerm })) =
     case project nativeType of
