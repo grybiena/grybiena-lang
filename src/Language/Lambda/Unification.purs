@@ -51,7 +51,7 @@ class Unify a b m where
 class UnificationError typ err where
   unificationError :: typ -> typ -> err
 
-class InfiniteTypeError var typ err where
+class InfiniteTypeError var typ err | typ -> err where
   infiniteTypeError :: var -> typ -> err
 
 newtype Skolem = Skolem Int

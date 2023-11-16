@@ -12,8 +12,12 @@ import Data.Array (replicate, (..))
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
+import Data.FoldableWithIndex (foldrWithIndex)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
+import Data.Homogeneous (class HomogeneousRowLabels, class ToHomogeneousRow)
+import Data.Homogeneous.Record (Homogeneous, fromHomogeneous, homogeneous)
+import Data.List (List(..), (:))
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
@@ -25,9 +29,10 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, replace, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class Shadow, arrow, (:->:))
-import Language.Lambda.Ski (class SKI)
+import Language.Lambda.Reduction (class Basis)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, fresh, fromInt, substitute, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
+import Language.Value.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
@@ -35,6 +40,8 @@ import Parsing.Expr (buildExprParser)
 import Parsing.String (char)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
+import Prim.Row (class Union)
+import Record (union)
 import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -53,7 +60,7 @@ data TT m a =
   -- Values
 
   | TypeAnnotation a (Term m)
-  | Native (Native m)
+  | Native (Native (Term m))
 
 derive instance Generic (TT m a) _
 
@@ -178,91 +185,6 @@ instance PrettyLambda Var (TT m) where
   prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
 
 
-parseValue :: forall m n. Monad m => Fresh Int m => Fresh Var m => Monad n => ParserT String m (Term n)
-parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
-
-parseValueAtom :: forall m n. Monad m => Fresh Int m => Fresh Var m => Monad n => ParserT String m (Term n)
-parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> parsePureEffect <|> parseBindEffect <|> parseTypeLit <|> (parens parseValue)
-
-parseTypeLit :: forall m n. Fresh Int m => Monad m => ParserT String m (Term n)
-parseTypeLit = char '@' *> parseTypeAtom 
-
-parseNumeric :: forall m n. Monad m => ParserT String m (Term n)
-parseNumeric = (try parseNumber) <|> parseInt
-
-parseInt :: forall m n. Monad m => ParserT String m (Term n)
-parseInt = cat <<< Native <<< native <$> integer
- 
-parsePureEffect :: forall m n. Monad m => Monad n => Fresh Var m => ParserT String m (Term n)
-parsePureEffect = reserved "pureEffect" *> (cat <<< Native <$> lift pureE)
-
-parseBindEffect :: forall m n. Monad m => Fresh Var m => Bind n => ParserT String m (Term n)
-parseBindEffect = reserved "bindEffect" *> (cat <<< Native <$> lift bindE)
- 
-parseNatives :: forall m n. Monad m => Array (String /\ Native n) -> ParserT String m (Term n)
-parseNatives = choice <<< map (uncurry parseNative)
- 
-parseNative :: forall m n. Monad m => String -> Native n -> ParserT String m (Term n)
-parseNative name n = reserved name *> pure (cat (Native n))
- 
-parseNumber :: forall m n. Monad m => ParserT String m (Term n)
-parseNumber = cat <<< Native <<< num <$> number
-
-parseTypeAnnotation :: forall m n. Fresh Int m => Monad m => (Term n) -> ParserT String m (Term n)
-parseTypeAnnotation v = do
-  reservedOp "::"
-  t <- parseType
-  pure $ cat $ TypeAnnotation v t
- 
-parseAbs :: forall m n. Monad m => Fresh Var m => Fresh Int m => Monad n => ParserT String m (Term n)
-parseAbs = absMany <$> parsePats <*> parseValue
-  where
-    parsePats = reservedOp "\\" *> many1Till (Ident <<< TermVar <$> identifier) (reservedOp "->")
-
-parseApp :: forall m n. Monad m => Fresh Var m => Fresh Int m => Monad n => (Term n) -> ParserT String m (Term n)
-parseApp v = app v <$> parseValueAtom
-
-parseType :: forall m n. Fresh Int m => Monad m => ParserT String m (Term n)
-parseType = buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom 
-
-parseTypeAtom :: forall m n. Fresh Int m => Monad m => ParserT String m (Term n)
-parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< Ident <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType)
-
-parseTypeInt :: forall m n . Monad m => ParserT String m (Term n)
-parseTypeInt = reserved "Int" *> pure (cat TypeInt)
- 
-parseTypeNumber :: forall m n . Monad m => ParserT String m (Term n)
-parseTypeNumber = reserved "Number" *> pure (cat TypeNumber)
-  
-parseTypeEffect :: forall m n . Monad m => ParserT String m (Term n)
-parseTypeEffect = reserved "Effect" *> pure (cat TypeEffect)
-
-
-parseTypeArrow :: forall m n. Fresh Int m => Monad m => (Term n) -> ParserT String m (Term n)
-parseTypeArrow a = do
-  reservedOp "->"
-  b <- parseType
-  pure (app (app (cat Arrow) a) b)
-
-parseStar :: forall m n . Monad m => ParserT String m (Term n)
-parseStar = choice (star <$> (1 .. 4))
-  where
-    star i = do
-      reservedOp (fromCharArray (replicate i '*'))
-      pure $ cat (Star i)
-
-parseTypeAbs :: forall m n. Fresh Int m => Monad m => ParserT String m (Term n)
-parseTypeAbs = absMany <$> parsePats <*> parseType
-  where
-    parsePats = reservedOp "forall" *> many1Till scopedVar (reservedOp ".")
-    scopedVar = do
-      i <- identifier
-      s <- lift fresh
-      pure $ Scoped (TypeVar i) (Scope s)
-
-parseTypeApp :: forall m n. Fresh Int m => Monad m => (Term n) -> ParserT String m (Term n)
-parseTypeApp v = app v <$> parseTypeAtom
-
 data UnificationError m =
     NotInScope Var
   | Err String
@@ -345,6 +267,7 @@ instance
   ( Monad m
   , Unify (Term n) (Term n) m
   , MonadState (TypingContext Var Mu Var (TT n)) m
+  , MonadThrow (UnificationError n) m
   ) => Inference Var (TT n) (Term n) m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
@@ -355,54 +278,15 @@ instance
 
   inference (TypeAnnotation v t) = do
     (t' :: Cofree (LambdaF Var (TT n)) (Term n)) <- v
-    _ <- unify (t :: Term n) (head t' :: Term n)
+    unify (t :: Term n) (head t' :: Term n)
     pure (t :< tail t')
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
-
-newtype Native :: (Type -> Type) -> Type
-newtype Native m = Purescript { nativeType :: Term m, nativeTerm :: forall a. a }
-
-
-
-instance Eq (Native m) where
-  eq (Purescript a) (Purescript b) = a.nativeType == b.nativeType && (a.nativeTerm :: String) == b.nativeTerm
-
-instance Show (Native m) where
-  show (Purescript { nativeType, nativeTerm }) = "(" <> unsafeCoerce nativeTerm <> " :: " <> prettyPrint nativeType <> ")"
-
-unwrap :: forall m. (TT m) Void -> Maybe (forall a . a) 
-unwrap (Native (Purescript { nativeTerm })) = Just nativeTerm
-unwrap _ = Nothing
-
-intPlus :: forall m . Native m
-intPlus = native (\(a :: Int) (b :: Int) -> a + b)
-
-numPlus :: forall m. Native m
-numPlus = native (\(a :: Number) (b :: Number) -> a + b)
-
-int :: forall m . Int -> Native m
-int i = native i
-
-num :: forall m. Number -> Native m
-num i = native i
-
-native :: forall m t . Reifies t m => t -> Native m
-native term = Purescript
-  { nativeType: reify (Proxy :: Proxy t)
-  , nativeTerm: unsafeCoerce term
-  }
-
-logInt :: forall m. Reifies m m => MonadEffect m => Native m
-logInt = native prim
-  where
-    prim :: Int -> m Int
-    prim a = liftEffect (log (show a)) *> pure 0
 
 instance
   ( Monad n
   , Fresh Var n
-  ) => SKI (TT m) n where
-  skiS = do
+  ) => Basis (TT m) n where
+  basisS = do
     a <- fresh
     b <- fresh
     c <- fresh
@@ -413,7 +297,7 @@ instance
               prim x y z = x z (y z)
            in unsafeCoerce prim
       }
-  skiK = do
+  basisK = do
     a <- fresh
     b <- fresh
     pure $ Native $ Purescript
@@ -423,7 +307,7 @@ instance
               prim = const
            in unsafeCoerce prim
       }
-  skiI = do
+  basisI = do
     a <- fresh
     pure $ Native $ Purescript
       { nativeType: (var a :->: var a)
@@ -432,72 +316,5 @@ instance
               prim = identity
            in unsafeCoerce prim
       }
-
-
-
-pureE :: forall n m. Monad m => Fresh Var m => Applicative n => m (Native n)
-pureE = do
-  a <- fresh
-  pure $ Purescript
-    { nativeType: abs a $ var a :->: (app (cat TypeEffect) (var a))
-    , nativeTerm:
-        let prim :: forall a. a -> m a
-            prim = pure
-         in unsafeCoerce prim
-    }
- 
-bindE :: forall n m. Monad m => Fresh Var m => Bind n => m (Native n)
-bindE = do
-  a <- fresh
-  b <- fresh
-  pure $ Purescript
-    { nativeType: absMany [a,b]
-                $ (app (cat TypeEffect) (var a))
-             :->: (var a :->: (app (cat TypeEffect) (var b)))
-             :->: (app (cat TypeEffect) (var b))
-    , nativeTerm:
-        let prim :: forall a b. m a -> (a -> m b) -> m b
-            prim = (>>=)
-         in unsafeCoerce prim
-    }
-   
-
-natives :: forall m. Reifies m m => MonadEffect m =>  Array (String /\ Native m)
-natives =
-  [ "intPlus" /\ intPlus
-  , "numPlus" /\ numPlus
-  , "logInt" /\ logInt
-  ]
-
-
--- better to use homogenous records
--- natives :: forall row m . Homogeneous row (Native m) => Record row
---
--- then combine using disjoint union (preventing overlap of names)
--- allowing modularisation of Native effects which have different constraints
---
--- then unfold into Array (String /\ Native m) and build the parser for that constrained runtime
-
-data U (a :: Symbol)
-
-class Reifies :: forall k. k -> (Type -> Type) -> Constraint
-class Reifies s m where
-  reify :: Proxy s -> (Term m)
-
-instance Reifies (->) m where
-  reify _ = cat Arrow
-else
-instance Reifies Int m where
-  reify _ = cat TypeInt
-else
-instance Reifies Number m where
-  reify _ = cat TypeNumber
-else
-instance (Reifies a m, Reifies b m) => Reifies (a b) m where
-  reify _ = app (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b))
-else
-instance Reifies m m where
-  reify _ = cat TypeEffect
-
 
 

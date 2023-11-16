@@ -1,4 +1,4 @@
-module Language.Lambda.Ski where
+module Language.Lambda.Reduction where
 
 -- https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis
 
@@ -16,7 +16,7 @@ elimAbs :: forall f var cat m.
        => Ord var
        => Traversable cat
        => Functor cat
-       => SKI cat m
+       => Basis cat m
        => Monad m
        => Eq (f (LambdaF var cat))
        => f (LambdaF var cat)
@@ -28,12 +28,12 @@ elimAbs lam =
     App a b -> app <$> elimAbs a <*> elimAbs b
     Abs x e ->
       case project e of
-        Var v | v == x -> cat <$> skiI
+        Var v | v == x -> cat <$> basisI
         Abs _ f | x `freeIn` f -> (abs x <$> elimAbs e) >>= elimAbs  
         -- eta reduction
         App a b | b == var x -> elimAbs a
         App a b | x `freeIn` e -> do
-                s <- cat <$> skiS
+                s <- cat <$> basisS
                 f <- app s <$> (elimAbs (abs x a))
                 app f <$> (elimAbs (abs x b))
 
@@ -41,17 +41,18 @@ elimAbs lam =
 
         -- T[\x.E] => (K T[E]) (when x does not occur free in E) 
         _ -> do
-           k <- cat <$> skiK
+           k <- cat <$> basisK
            app k <$> (elimAbs e)
     Cat c -> cat <$> (traverse elimAbs c)
 
 
 
 
-class SKI cat m where
-  skiS :: forall a. m (cat a) 
-  skiK :: forall a. m (cat a)
-  skiI :: forall a. m (cat a)
+class Basis :: forall k1 k2. (k1 -> k2) -> (k2 -> Type) -> Constraint
+class Basis cat m where
+  basisS :: forall a. m (cat a) 
+  basisK :: forall a. m (cat a)
+  basisI :: forall a. m (cat a)
 
 
 

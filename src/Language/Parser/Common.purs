@@ -15,8 +15,8 @@ type Parser a = IndentParser String a
 
 type LanguageDef m = GenLanguageDef String m
 
-languageDef :: forall m . LanguageDef m
-languageDef = LanguageDef 
+languageDef :: forall m . Array String -> LanguageDef m
+languageDef extraReservedNames = LanguageDef 
   { commentStart: "{-"
   , commentEnd: "-}"
   , commentLine: "--"
@@ -33,11 +33,11 @@ languageDef = LanguageDef
   op' :: ParserT String m Char
   op' = oneOf [ ':', '!', '#', '$', '%', '&', '*', '+', '.', '/', '<', '=', '>', '?', '@', '\\', '^', '|', '-', '~' ]
   reservedOpNames =  [ "=", "::", ",", ".", "\\", "->"]
-  reservedNames = [ "forall", "type", "data", "String", "Int", "Number", "Effect", "_", "intPlus", "numPlus", "pureEffect", "bindEffect"]
+  reservedNames = [ "forall", "type", "data", "String", "Int", "Number", "Effect" ] <> extraReservedNames
 
  
 tokenParser :: forall m. GenTokenParser String m 
-tokenParser = makeTokenParser languageDef
+tokenParser = makeTokenParser (languageDef  ["_", "intPlus", "numPlus", "pureEffect", "bindEffect"])
 
 integer :: forall m . Monad m => ParserT String m Int
 integer = tokenParser.integer 

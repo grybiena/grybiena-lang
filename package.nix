@@ -3,6 +3,8 @@
   { version = "1.0.0";
     dependencies =
       [ fixed-points
+        homogeneous
+        heterogeneous
         matryoshka
         ordered-collections
         parsing
