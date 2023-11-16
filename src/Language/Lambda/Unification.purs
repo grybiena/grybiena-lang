@@ -11,7 +11,7 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (LambdaF(..), abs, app, cat, occursIn, replace, var)
+import Language.Lambda.Calculus (LambdaF(..), occursIn, replace, var)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
@@ -45,8 +45,8 @@ class Context var typ m | var -> typ where
 class NotInScopeError var err where
   notInScopeError :: var -> err
  
-class Unification typ m where
-  unify :: typ -> typ -> m typ
+class Unify a b m where
+  unify :: a -> b-> m Unit
 
 class UnificationError typ err where
   unificationError :: typ -> typ -> err
@@ -62,16 +62,17 @@ instance
   , Rewrite (f (LambdaF var cat)) m 
   , Recursive (f (LambdaF var cat)) (LambdaF var cat)
   , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Unification (cat (f (LambdaF var cat))) m
+  , Unify (cat (f (LambdaF var cat))) (cat (f (LambdaF var cat))) m
+  , Unify var (f (LambdaF var cat)) m
   , UnificationError (f (LambdaF var cat)) err
   , MonadThrow err m
-  ) => Unification (f (LambdaF var cat)) m where
+  ) => Unify (f (LambdaF var cat)) (f (LambdaF var cat)) m where
   unify ta tb = do
      case project ta /\ project tb of
-       Var a /\ Var b | a == b -> pure ta
-       Var a /\ _ -> substitute a tb *> pure tb
-       _ /\ Var b -> substitute b ta *> pure ta
+       Var v /\ _ -> unify v tb
+       _ /\ Var v -> unify v ta 
        Abs ab aa /\ Abs bb ba -> do
+         -- TODO skolemize with a fresh (shared) skolem
          qv <- fresh
          let qty :: f (LambdaF var cat)
              qty = var qv
@@ -79,10 +80,11 @@ instance
          substitute bb qty
          ar <- rewrite aa
          br <- rewrite ba
-         abs qv <$> unify ar br
+         unify ar br
+       -- TODO skolemize Abs and unify with any arbitrary type
        App ab aa /\ App bb ba -> do
-         app <$> unify ab bb <*> unify aa ba
-       Cat ca /\ Cat cb -> cat <$> unify ca cb
+         unify ab bb *> unify aa ba
+       Cat ca /\ Cat cb -> unify ca cb
        _ -> throwError $ unificationError ta tb
 
 
@@ -158,14 +160,15 @@ instance
   , Recursive (f (LambdaF var' cat')) (LambdaF var' cat')
   , Corecursive (f (LambdaF var' cat')) (LambdaF var' cat')
   , InfiniteTypeError var' (f (LambdaF var' cat')) err
-  , Unification (cat' (f (LambdaF var' cat'))) m
+  , Unify (cat' (f (LambdaF var' cat'))) (cat' (f (LambdaF var' cat'))) m
+  , Unify var' (f (LambdaF var' cat')) m
   , UnificationError (f (LambdaF var' cat')) err
   , MonadThrow err m
   ) => Substitute var' cat' f m where
   substitute v t' = do
      t <- rewrite t'
      when (v `occursIn` t) $ throwError $ infiniteTypeError v t 
-     u <- rewrite (var v)
+     u <- rewrite (var v :: f (LambdaF var' cat'))
      case project u of
         Var v' | v' == v -> pure unit 
         _ -> void $ unify u t

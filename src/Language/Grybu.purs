@@ -27,9 +27,9 @@ import Data.Tuple.Nested (type (/\), (/\))
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, (:->:))
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class Shadow, arrow, (:->:))
 import Language.Lambda.Ski (class SKI)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Unification, class UnificationError, TypingContext, fresh, rewrite, runUnification, unificationError, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class UnificationError, class Unify, TypingContext, fresh, fromInt, rewrite, runUnification, substitute, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
 import Machine.Krivine (class Evaluate, class MachineFault)
 import Matryoshka.Class.Recursive (project)
@@ -103,9 +103,22 @@ instance Foldable (TT m) where
   foldl _ b _ = b
   foldMap _ _ = mempty
 
+newtype Scope = Scope Int
+derive newtype instance Show Scope
+derive newtype instance Ord Scope
+derive newtype instance Eq Scope
+
+newtype Skolem = Skolem Int
+derive newtype instance Show Skolem
+derive newtype instance Ord Skolem
+derive newtype instance Eq Skolem
+
+
 data Var =
-    TypeVar String
-  | TermVar String
+    Ident Ident
+  | Scoped Ident Scope 
+  | Skolemized Ident Scope Skolem
+
 
 derive instance Generic Var _
 instance Show Var where
@@ -115,16 +128,47 @@ instance Ord Var where
 instance Eq Var where
   eq = genericEq
 
-instance PrettyVar Var where
-  prettyVar (TypeVar v) = text v
-  prettyVar (TermVar v) = text v
-
 instance Pretty Var where
-  pretty = prettyVar
+  pretty (Ident i) = pretty i
+  pretty (Scoped i s) = pretty i <> text (":" <> show s)
+  pretty (Skolemized i s k) = pretty i <> text (":" <> show s) <> text (":" <>show k)
+
+instance Shadow Var where
+  shadow (Ident i) = Ident i
+  shadow (Scoped i _) = Ident i
+  shadow (Skolemized i _ _) = Ident i
+
+instance PrettyVar Var where
+  prettyVar = pretty
+
+data Ident =
+    TypeVar String
+  | TermVar String
+
+derive instance Generic Ident _
+instance Show Ident where
+  show = genericShow
+instance Ord Ident where
+  compare = genericCompare
+instance Eq Ident where
+  eq = genericEq
+
+instance Pretty Ident where
+  pretty (TypeVar v) = text v
+  pretty (TermVar v) = text v
+
+isTypeIdent :: Ident -> Boolean
+isTypeIdent (TypeVar _) = true
+isTypeIdent _ = false
+
+isTypeVar :: Var -> Boolean
+isTypeVar (Ident i) = isTypeIdent i
+isTypeVar (Scoped i _) = isTypeIdent i
+isTypeVar (Skolemized i _ _) = isTypeIdent i
 
 instance PrettyLambda Var (TT m) where
-  prettyAbs (TermVar i) a = (text "\\" <> prettyVar i) <+> text "->" <+> pretty a
-  prettyAbs (TypeVar i) a = (text "forall " <> prettyVar i) <+> text "." <+> pretty a
+  prettyAbs i a | isTypeVar i = (text "forall " <> prettyVar i) <+> text "." <+> pretty a
+  prettyAbs i a = (text "\\" <> prettyVar i) <+> text "->" <+> pretty a
   prettyApp (In (App (In (Cat Arrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"
   prettyApp f a = text "(" <+> pretty f <+> pretty a <+> text ")"
   prettyCat Arrow = text "->"
@@ -138,13 +182,13 @@ instance PrettyLambda Var (TT m) where
   prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
 
 
-parseValue :: forall m n. Monad m => Fresh Var m => Monad n => ParserT String m (Term n)
+parseValue :: forall m n. Monad m => Fresh Int m => Fresh Var m => Monad n => ParserT String m (Term n)
 parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
 
-parseValueAtom :: forall m n. Monad m => Fresh Var m => Monad n => ParserT String m (Term n)
-parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> parsePureEffect <|> parseBindEffect <|> parseTypeLit <|> (parens parseValue)
+parseValueAtom :: forall m n. Monad m => Fresh Int m => Fresh Var m => Monad n => ParserT String m (Term n)
+parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNative "intPlus" intPlus <|> parseNative "numPlus" numPlus <|> parsePureEffect <|> parseBindEffect <|> parseTypeLit <|> (parens parseValue)
 
-parseTypeLit :: forall m n. Monad m => ParserT String m (Term n)
+parseTypeLit :: forall m n. Fresh Int m => Monad m => ParserT String m (Term n)
 parseTypeLit = char '@' *> parseTypeAtom 
 
 parseNumeric :: forall m n. Monad m => ParserT String m (Term n)
@@ -168,25 +212,25 @@ parseNative name n = reserved name *> pure (cat (Native n))
 parseNumber :: forall m n. Monad m => ParserT String m (Term n)
 parseNumber = cat <<< Native <<< num <$> number
 
-parseTypeAnnotation :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
+parseTypeAnnotation :: forall m n. Fresh Int m => Monad m => (Term n) -> ParserT String m (Term n)
 parseTypeAnnotation v = do
   reservedOp "::"
   t <- parseType
   pure $ cat $ TypeAnnotation v t
  
-parseAbs :: forall m n. Monad m => Fresh Var m => Monad n => ParserT String m (Term n)
+parseAbs :: forall m n. Monad m => Fresh Var m => Fresh Int m => Monad n => ParserT String m (Term n)
 parseAbs = absMany <$> parsePats <*> parseValue
   where
-    parsePats = reservedOp "\\" *> many1Till (TermVar <$> identifier) (reservedOp "->")
+    parsePats = reservedOp "\\" *> many1Till (Ident <<< TermVar <$> identifier) (reservedOp "->")
 
-parseApp :: forall m n. Monad m => Fresh Var m => Monad n => (Term n) -> ParserT String m (Term n)
+parseApp :: forall m n. Monad m => Fresh Var m => Fresh Int m => Monad n => (Term n) -> ParserT String m (Term n)
 parseApp v = app v <$> parseValueAtom
 
-parseType :: forall m n. Monad m => ParserT String m (Term n)
+parseType :: forall m n. Fresh Int m => Monad m => ParserT String m (Term n)
 parseType = buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom 
 
-parseTypeAtom :: forall m n. Monad m => ParserT String m (Term n)
-parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType)
+parseTypeAtom :: forall m n. Fresh Int m => Monad m => ParserT String m (Term n)
+parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< Ident <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType)
 
 parseTypeInt :: forall m n . Monad m => ParserT String m (Term n)
 parseTypeInt = reserved "Int" *> pure (cat TypeInt)
@@ -198,7 +242,7 @@ parseTypeEffect :: forall m n . Monad m => ParserT String m (Term n)
 parseTypeEffect = reserved "Effect" *> pure (cat TypeEffect)
 
 
-parseTypeArrow :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
+parseTypeArrow :: forall m n. Fresh Int m => Monad m => (Term n) -> ParserT String m (Term n)
 parseTypeArrow a = do
   reservedOp "->"
   b <- parseType
@@ -211,12 +255,16 @@ parseStar = choice (star <$> (1 .. 4))
       reservedOp (fromCharArray (replicate i '*'))
       pure $ cat (Star i)
 
-parseTypeAbs :: forall m n. Monad m => ParserT String m (Term n)
+parseTypeAbs :: forall m n. Fresh Int m => Monad m => ParserT String m (Term n)
 parseTypeAbs = absMany <$> parsePats <*> parseType
   where
-    parsePats = reservedOp "forall" *> many1Till (TypeVar <$> identifier) (reservedOp ".")
+    parsePats = reservedOp "forall" *> many1Till scopedVar (reservedOp ".")
+    scopedVar = do
+      i <- identifier
+      s <- lift fresh
+      pure $ Scoped (TypeVar i) (Scope s)
 
-parseTypeApp :: forall m n. Monad m => (Term n) -> ParserT String m (Term n)
+parseTypeApp :: forall m n. Fresh Int m => Monad m => (Term n) -> ParserT String m (Term n)
 parseTypeApp v = app v <$> parseTypeAtom
 
 data UnificationError m =
@@ -242,8 +290,11 @@ instance Eq (UnificationError m) where
 instance ArrowObject ((TT m) a) where
   arrowObject = Arrow
 
-instance Enumerable Var where
+instance Enumerable Ident where
   fromInt i = TypeVar ("t" <> show i)
+
+instance Enumerable Var where
+  fromInt = Ident <<< fromInt
 
 instance NotInScopeError Var (UnificationError m) where 
   notInScopeError = NotInScope
@@ -259,19 +310,35 @@ instance
   ( MonadThrow (UnificationError n) m
   , Fresh Var m
   , MonadState (TypingContext Var Mu Var (TT n)) m
-  ) => Unification (TT n (Term n)) m where
-  unify Arrow Arrow = pure Arrow
+  ) => Unify Var (Term n) m where
+  unify v@(Ident i) t =
+    case project t of
+      Var (Ident j) | i == j -> pure unit
+      e -> substitute v t
+  unify v@(Skolemized _ _ i) t =
+    case project t of
+      Var (Skolemized _ _ j) | i == j -> pure unit
+      e -> throwError $ unificationError (var v) t
+  unify v t = throwError $ unificationError (var v) t
+
+
+instance
+  ( MonadThrow (UnificationError n) m
+  , Fresh Var m
+  , MonadState (TypingContext Var Mu Var (TT n)) m
+  ) => Unify (TT n (Term n)) (TT n (Term n)) m where
+  unify Arrow Arrow = pure unit
   -- TODO concerned that our hierarchy of type universes may permit paradox
   -- should the type of the arrow be the max of the types of the domain/codomain i.e. (* -> * :: **)
   -- currently it is always * which is simple but probably wrong for some definition of wrong 
   -- TODO read more about Girard's paradox and implementations of cumulativity constraints
-  unify (Star i) (Star j) = pure $ Star (max i j)
-  unify (TypeAnnotation a ak) (TypeAnnotation b bk) = flip TypeAnnotation <$> unify ak bk  <*> unify a b
-  unify (TypeAnnotation a k) b = flip TypeAnnotation k <$> unify a (cat b)
-  unify a (TypeAnnotation b k) = flip TypeAnnotation k <$> unify (cat a) b
-  unify TypeInt TypeInt = pure TypeInt
-  unify TypeNumber TypeNumber = pure TypeNumber
-  unify TypeEffect TypeEffect = pure TypeEffect
+  unify (Star i) (Star j) = pure unit
+  unify (TypeAnnotation a ak) (TypeAnnotation b bk) = unify ak bk  *> unify a b
+  unify (TypeAnnotation a k) b = unify a (cat b)
+  unify a (TypeAnnotation b k) = unify (cat a) b
+  unify TypeInt TypeInt = pure unit
+  unify TypeNumber TypeNumber = pure unit
+  unify TypeEffect TypeEffect = pure unit
   unify a b = throwError $ unificationError (cat a) (cat b)
 
 instance 
@@ -285,7 +352,7 @@ instance
 
 instance
   ( Monad m
-  , Unification (Term n) m
+  , Unify (Term n) (Term n) m
   , MonadState (TypingContext Var Mu Var (TT n)) m
   ) => Inference Var (TT n) (Term n) m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
@@ -326,7 +393,7 @@ instance
          -- TODO maintain the unification context from when the program the machine is running was inferred
          -- (runUnification should be in m)
          let ret = fst $ runUnification do
-                     void $ unify (var v) (cat (unsafeCoerce arg) :: Term n)
+                     unify (var v :: Term n) (cat (unsafeCoerce arg) :: Term n)
                      rewrite b
          case ret of
            Left (err :: UnificationError n) -> pure $ cat $ Bottom $ "Run-time type application error: " <> show err 

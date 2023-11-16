@@ -19,7 +19,7 @@ import Language.Grybu (Native(..), TT(..), Term, UnificationError(..), Var(..), 
 import Language.Lambda.Calculus (universe)
 import Language.Lambda.Inference (infer, runInference)
 import Language.Lambda.Ski (elimAbs)
-import Language.Lambda.Unification (class Fresh, class Substitute, class Unification, rewrite, runUnification, runUnificationT, unify)
+import Language.Lambda.Unification (class Fresh, class Substitute, class Unify, rewrite, runUnification, runUnificationT, unify)
 import Machine.Closure (closure)
 import Machine.Krivine (runUnbounded)
 import Parsing (ParseError, runParserT)
@@ -98,9 +98,9 @@ grybuTests = runTest do
 
 
 
-    testInferKind "forall a . a" "(t1 -> t1)"
-    testInferKind "forall a b. a b" "((t2 -> t4) -> (t2 -> t4))"
-    testInferKind "forall a b. b a" "(t1 -> ((t1 -> t4) -> t4))" 
+    testInferKind "forall a . a" "(t2 -> t2)"
+    testInferKind "forall a b. a b" "((t4 -> t6) -> (t4 -> t6))"
+    testInferKind "forall a b. b a" "(t3 -> ((t3 -> t6) -> t6))" 
     testInferKind "forall a . a -> a" "(* -> *)"
     testInferKind "forall a b . a -> b" "(* -> (* -> *))"
 
@@ -133,9 +133,9 @@ grybuTests = runTest do
     testInferType "pureEffect @Int" "(Int -> ( Effect Int ))"
     testInferSkiType "pureEffect @Int" "(Int -> ( Effect Int ))"
 
-    -- TODO This ain't good
-    testInferType "\\x -> pureEffect x" "(t2 -> (x -> ( Effect x )))"
-    -- This is what it should be... but we get this from eta reduction
+    -- TODO skolemize the variables bound by the forall within unify
+    testInferType "\\x -> pureEffect x" "forall t1 . (t1 -> ( Effect t1 ))"
+    -- This works by eta reduction
     testInferSkiType "\\x -> pureEffect x" "forall t1 . (t1 -> ( Effect t1 ))"
 
     testInferType "bindEffect @Int @Int"  "(( Effect Int ) -> ((Int -> ( Effect Int )) -> ( Effect Int )))"
@@ -143,6 +143,11 @@ grybuTests = runTest do
 
     testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> ( Effect Int )) -> (( Effect Int ) -> ( Effect Int )))"
     testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> ( Effect Int )) -> (( Effect Int ) -> ( Effect Int )))"
+
+    testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> ( Effect Int )) -> (( Effect Int ) -> ( Effect Int )))"
+    testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> ( Effect Int )) -> (( Effect Int ) -> ( Effect Int )))"
+
+
 
 
 --    testInferSkiType "\\x y -> bindEffect @Int x y" "(( Effect Int ) -> (t4 -> ((Int -> ( Effect x )) -> ( Effect x ))))"
@@ -282,7 +287,7 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
 --        Right (_ :: Term Identity) -> Assert.assert "Expected failure but got success" false
 
 -- incorrect!
-checkAlphaEquiv :: forall n m. Monad n => Substitute Var (TT m) Mu n => Fresh Var n => Unification (Term m) n => Term m -> Term m -> n Boolean
+checkAlphaEquiv :: forall n m. Monad n => Substitute Var (TT m) Mu n => Fresh Var n => Unify (Term m) (Term m) n => Term m -> Term m -> n Boolean
 checkAlphaEquiv t1 t2 = do
   a <- do
        _ <- unify t2 t1
@@ -317,14 +322,14 @@ alphaEquivalent t1 t2 = do
   pure (a && b)
 
 
-typeParser :: forall m n. Monad n => Fresh Var m => MonadRec m => String -> m (Either ParseError (Term n)) 
+typeParser :: forall m n. Monad n => Fresh Int m => MonadRec m => String -> m (Either ParseError (Term n)) 
 typeParser s = runParserT s do
   v <- parseType
   eof
   pure v
 
 
-termParser :: forall m n. Monad n => Fresh Var m => MonadRec m => String -> m (Either ParseError (Term n))
+termParser :: forall m n. Monad n => Fresh Int m => Fresh Var m => MonadRec m => String -> m (Either ParseError (Term n))
 termParser s = runParserT s do
   v <- parseValue
   eof

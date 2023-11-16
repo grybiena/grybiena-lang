@@ -10,7 +10,7 @@ import Data.Foldable (class Foldable)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF(..), app, cat, var)
-import Language.Lambda.Unification (class Context, class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Rewrite, class Unification, class UnificationError, TypingContext, assume, fresh, require, rewrite, runUnification, unify)
+import Language.Lambda.Unification (class Context, class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Rewrite, class UnificationError, class Unify, TypingContext, assume, fresh, require, rewrite, runUnification, unify)
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
@@ -23,7 +23,7 @@ runInference :: forall exp var cat err t.
      => Fresh (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
      => Context var (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
      => Rewrite (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
-     => Unification (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
+     => Unify (t (LambdaF var cat)) (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
      => Arrow (t (LambdaF var cat))
      => Inference var cat (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
      => Enumerable var
@@ -34,10 +34,11 @@ runInference :: forall exp var cat err t.
      => InfiniteTypeError var (t (LambdaF var cat)) err 
      => UnificationError (t (LambdaF var cat)) err
      => Fresh var (ExceptT err (State (TypingContext var t var cat))) 
-     => Unification (cat (t (LambdaF var cat))) (ExceptT err (State (TypingContext var t var cat))) 
+     => Unify (cat (t (LambdaF var cat))) (cat (t (LambdaF var cat))) (ExceptT err (State (TypingContext var t var cat))) 
      => Inference var cat (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat))) 
      => Corecursive (t (LambdaF var cat)) (LambdaF var cat)
      => Recursive (t (LambdaF var cat)) (LambdaF var cat)
+     => Shadow var
      => exp -> Either err (t (LambdaF var cat)) 
 runInference v = head <$> (fst $ runUnification (infer v))
 
@@ -50,10 +51,11 @@ infer :: forall exp var cat m typ .
      => Fresh typ m
      => Context var typ m
      => Rewrite typ m
-     => Unification typ m
+     => Unify typ typ m
      => Recursive typ (LambdaF var cat)
      => Corecursive typ (LambdaF var cat)
      => Arrow typ
+     => Shadow var
      => Inference var cat typ m
      => exp -> (m (Cofree (LambdaF var cat) typ)) 
 infer = cata rule
@@ -65,11 +67,12 @@ rule :: forall var cat m typ .
      => Fresh typ m
      => Context var typ m
      => Rewrite typ m
-     => Unification typ m
+     => Unify typ typ m
      => Recursive typ (LambdaF var cat)
      => Corecursive typ (LambdaF var cat)
      => Arrow typ
      => Inference var cat typ m
+     => Shadow var
      => Algebra (LambdaF var cat) (m (Cofree (LambdaF var cat) typ)) 
 rule expr = 
   case expr of
@@ -82,6 +85,9 @@ rule expr =
 class Inference var cat typ m where
   inference :: cat (m (Cofree (LambdaF var cat) typ)) -> m (Cofree (LambdaF var cat) typ)
 
+class Shadow var where
+  shadow :: var -> var
+
 absRule :: forall m typ var cat.
            Bind m
         => Fresh typ m
@@ -89,12 +95,14 @@ absRule :: forall m typ var cat.
         => Rewrite typ m
         => Arrow typ
         => Applicative m
+        => Shadow var
         => var
         -> m (Cofree (LambdaF var cat) typ)
         -> m (Cofree (LambdaF var cat) typ)
 absRule binding inferBody = do 
   tyBind <- fresh
   assume binding tyBind
+  assume (shadow binding) tyBind 
   tyBody <- inferBody
   tyBind' <- rewrite tyBind 
   pure $ (tyBind' :->: (head tyBody)) :< (Abs binding tyBody)
@@ -112,7 +120,7 @@ appRule :: forall m typ var cat.
            Bind m
         => IsType typ
         => Functor cat
-        => Unification typ m
+        => Unify typ typ m
         => Applicative m
         => Arrow typ
         => Fresh typ m
@@ -129,7 +137,7 @@ appRule f a = do
     -- Applying a type level lambda (forall)
     Abs v b | isType argTy -> do
       let argLit = flat a
-      _ <- unify (var v) argLit
+      _ <- unify (var v :: typ) argLit
       tyApp <- rewrite b
       pure $ tyApp :< App f a
     -- Applying a term level arrow (a -> b)
