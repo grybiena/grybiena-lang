@@ -24,6 +24,7 @@ elimAbs :: forall f var cat m.
 elimAbs lam = 
   case project lam of
     Var v -> pure (var v)
+    -- TODO reduce (App (Cat _) (Cat _))
     App a b -> app <$> elimAbs a <*> elimAbs b
     Abs x e ->
       case project e of
@@ -36,9 +37,6 @@ elimAbs lam =
                 f <- app s <$> (elimAbs (abs x a))
                 app f <$> (elimAbs (abs x b))
 
-        -- TODO Cat _ won't terminate under certain conditions... 
-        -- e.g. \x -> prim x y
-        -- may need specialized reduction for each prim...
         Cat _ | x `freeIn` e -> (abs x <$> elimAbs e) >>= elimAbs
 
         -- T[\x.E] => (K T[E]) (when x does not occur free in E) 

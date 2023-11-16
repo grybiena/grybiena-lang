@@ -2,34 +2,24 @@ module Test.Grybu where
 
 import Prelude
 
-import Control.Comonad.Cofree (head, (:<))
+import Control.Comonad.Cofree (head)
 import Control.Monad.Rec.Class (class MonadRec)
-import Data.Either (Either(..), either)
-import Data.Functor.Mu (Mu)
+import Data.Either (Either(..))
 import Data.Identity (Identity)
-import Data.Map as Map
-import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff.Class (liftAff)
-import Effect.Class (liftEffect)
-import Effect.Console (log)
-import Language.Grybu (Native(..), TT(..), Term, UnificationError(..), Var(..), int, num, parseType, parseValue)
-import Language.Lambda.Calculus (universe)
-import Language.Lambda.Inference (infer, runInference)
+import Language.Grybu (Term, UnificationError, Var, parseType, parseValue)
+import Language.Lambda.Inference (infer)
 import Language.Lambda.Ski (elimAbs)
-import Language.Lambda.Unification (class Fresh, class Substitute, class Unify, rewrite, runUnification, runUnificationT, unify)
-import Machine.Closure (closure)
-import Machine.Krivine (runUnbounded)
+import Language.Lambda.Unification (class Fresh, runUnificationT)
 import Parsing (ParseError, runParserT)
-import Parsing.Indent (runIndent)
 import Parsing.String (eof)
 import Pretty.Printer (prettyPrint)
 import Test.Unit (TestSuite, suite, test)
 import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
-import Unsafe.Coerce (unsafeCoerce)
 
 grybuTests :: Effect Unit
 grybuTests = runTest do
@@ -127,40 +117,42 @@ grybuTests = runTest do
 -- 
 --
 ---- Pure
-    testInferType "pureEffect" "forall t1 . (t1 -> ( Effect t1 ))"
-    testInferSkiType "pureEffect" "forall t1 . (t1 -> ( Effect t1 ))"
+    testInferType "pureEffect" "(forall t1 . (t1 -> (Effect t1)))"
+    testInferSkiType "pureEffect" "(forall t1 . (t1 -> (Effect t1)))"
 
-    testInferType "pureEffect @Int" "(Int -> ( Effect Int ))"
-    testInferSkiType "pureEffect @Int" "(Int -> ( Effect Int ))"
+    testInferType "pureEffect @Int" "(Int -> (Effect Int))"
+    testInferSkiType "pureEffect @Int" "(Int -> (Effect Int))"
 
     -- skolemizing removes the forall, encoding its scope into the type variables 
-    testInferType "\\x -> pureEffect x" "(t2 -> ( Effect t2 ))"
+    testInferType "\\x -> pureEffect x" "(t2 -> (Effect t2))"
     -- This works by eta reduction
-    testInferSkiType "\\x -> pureEffect x" "forall t1 . (t1 -> ( Effect t1 ))"
+    testInferSkiType "\\x -> pureEffect x" "(forall t1 . (t1 -> (Effect t1)))"
 
     -- application to a term with a concrete type infers the universally quantified type variable
-    testInferType "(\\x -> pureEffect x) 1" "( Effect Int )"
-    testInferSkiType "(\\x -> pureEffect x) 1" "( Effect Int )"
+    testInferType "(\\x -> pureEffect x) 1" "(Effect Int)"
+    testInferSkiType "(\\x -> pureEffect x) 1" "(Effect Int)"
 
     -- application to a type annotation can be used to explicitly infer the type 
-    testInferType "(\\x -> pureEffect @Int x) 1" "( Effect Int )"
-    testInferSkiType "(\\x -> pureEffect @Int x) 1" "( Effect Int )"
+    testInferType "(\\x -> pureEffect @Int x) 1" "(Effect Int)"
+    testInferSkiType "(\\x -> pureEffect @Int x) 1" "(Effect Int)"
 
 
 
-    testInferType "bindEffect @Int @Int"  "(( Effect Int ) -> ((Int -> ( Effect Int )) -> ( Effect Int )))"
-    testInferSkiType "bindEffect @Int @Int"  "(( Effect Int ) -> ((Int -> ( Effect Int )) -> ( Effect Int )))"
+    testInferType "bindEffect @Int @Int"  "((Effect Int) -> ((Int -> (Effect Int)) -> (Effect Int)))"
+    testInferSkiType "bindEffect @Int @Int"  "((Effect Int) -> ((Int -> (Effect Int)) -> (Effect Int)))"
 
-    testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> ( Effect Int )) -> (( Effect Int ) -> ( Effect Int )))"
-    testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> ( Effect Int )) -> (( Effect Int ) -> ( Effect Int )))"
+    testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
+    testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
 
-    testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> ( Effect Int )) -> (( Effect Int ) -> ( Effect Int )))"
-    testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> ( Effect Int )) -> (( Effect Int ) -> ( Effect Int )))"
+    testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
+    testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
+
+    testInferType "pureEffect bindEffect" "(Effect (forall t2 . (forall t3 . ((Effect t2) -> ((t2 -> (Effect t3)) -> (Effect t3))))))" 
 
 
 
 
---    testInferSkiType "\\x y -> bindEffect @Int x y" "(( Effect Int ) -> (t4 -> ((Int -> ( Effect x )) -> ( Effect x ))))"
+--    testInferSkiType "\\x y -> bindEffect @Int x y" "((Effect Int) -> (t4 -> ((Int -> ( Effect x )) -> ( Effect x ))))"
 --
 --
 --
@@ -204,7 +196,7 @@ testInferType v t = test ("(" <> v <> ") :: " <> t) $ do
     tt <- typeParser t
     case Tuple <$> vt <*> tt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
+      Right ((val :: Term Identity) /\ (_ :: Term Identity)) -> do
         (i :: Term Identity) <- head <$> infer val
         liftAff $ Assert.equal t (prettyPrint i)
   case e of
@@ -219,7 +211,7 @@ testInferSkiType v t = test ("(" <> v <> ") :: " <> t) $ do
     tt <- typeParser t
     case Tuple <$> vt <*> tt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
+      Right ((val :: Term Identity) /\ (_ :: Term Identity)) -> do
         ski <- elimAbs val
 --        liftEffect $ log $ prettyPrint ski
         (i :: Term Identity) <- head <$> infer ski
@@ -235,7 +227,7 @@ testInferKind v t = test ("(" <> v <> ") :: " <> t) $ do
     tt <- typeParser t
     case Tuple <$> vt <*> tt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
+      Right ((val :: Term Identity) /\ (_ :: Term Identity)) -> do
         (i :: Term Identity) <- head <$> infer val
         liftAff $ Assert.equal t (prettyPrint i)
   case e of
@@ -249,7 +241,7 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
     tt <- typeParser t
     case Tuple <$> vt <*> tt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term Identity) /\ (typ :: Term Identity)) -> do
+      Right ((val :: Term Identity) /\ (_ :: Term Identity)) -> do
         (i :: Term Identity) <- head <$> infer val
         (j :: Term Identity) <- head <$> infer i
         liftAff $ Assert.equal t (prettyPrint i)
@@ -257,34 +249,6 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
   case e of
     Right _ -> pure unit
     Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> prettyPrint err) false
-
-
-
-
---testRun :: String -> TT Identity Void -> TestSuite
---testRun v h = test ("run (" <> v <> ")") do
---  case termParser v of
---    Left err -> Assert.assert ("parse error: " <> show err) false
---    Right val -> do
---      t <- runUnbounded (closure val Map.empty :< Nothing)
---      case t of
---        res | res == h -> pure unit
---        res -> Assert.assert (show res <> " /= " <> show h) false
-
---testRunEffectInt :: String -> Int -> TestSuite
---testRunEffectInt v h = test ("run (" <> v <> ")") do
---  case termParser v of
---    Left err -> Assert.assert ("parse error: " <> show err) false
---    Right (val :: Term Effect) -> do
---       t <- runUnbounded (closure val Map.empty :< Nothing)
---       case (t :: TT Effect Void) of
---         Native (Purescript { nativeTerm }) -> do
---           i <- liftEffect $ (unsafeCoerce nativeTerm :: Effect Int)
---           Assert.equal h i
---         e -> Assert.assert (show e) false
- 
- 
-
 
 
 --testExpectErr :: String -> UnificationError Identity -> TestSuite
@@ -296,40 +260,6 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
 --        Left e' -> Assert.equal e e'
 --        Right (_ :: Term Identity) -> Assert.assert "Expected failure but got success" false
 
--- incorrect!
-checkAlphaEquiv :: forall n m. Monad n => Substitute Var (TT m) Mu n => Fresh Var n => Unify (Term m) (Term m) n => Term m -> Term m -> n Boolean
-checkAlphaEquiv t1 t2 = do
-  a <- do
-       _ <- unify t2 t1
-       x <- rewrite t2
-       y <- rewrite t1
-       pure (universe x == universe y)
-  b <- do
-       _ <- unify t1 t2
-       x <- rewrite t1
-       y <- rewrite t2
-       pure  (universe x == universe y)
-  pure (a && b)
-
-
-
-
-
-alphaEquivalent :: forall m. Term m -> Term m -> Either (UnificationError m ) Boolean
-alphaEquivalent t1 t2 = do
-  a <- fst do 
-    runUnification do
-       _ <- unify t2 t1
-       x <- rewrite t2
-       y <- rewrite t1
-       pure  (universe x == universe y)
-  b <- fst do
-    runUnification do
-       _ <- unify t1 t2
-       x <- rewrite t1
-       y <- rewrite t2
-       pure  (universe x == universe y)
-  pure (a && b)
 
 
 typeParser :: forall m n. Monad n => Fresh Int m => MonadRec m => String -> m (Either ParseError (Term n)) 

@@ -7,31 +7,27 @@ import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Lazy (defer)
 import Control.Monad.Cont (lift)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
-import Control.Monad.Rec.Class (class MonadRec, Step(..))
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate, (..))
-import Data.Either (Either(..))
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.Map (Map)
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse)
-import Data.Tuple (fst, uncurry)
+import Data.Tuple (uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, replace, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class Shadow, arrow, (:->:))
 import Language.Lambda.Ski (class SKI)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem(..), TypingContext, fresh, fromInt, rewrite, runUnification, substitute, unificationError, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, fresh, fromInt, substitute, unificationError, unify)
 import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
-import Machine.Krivine (class Evaluate, class MachineFault)
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
@@ -167,10 +163,10 @@ isTypeVar (Scoped i _) = isTypeIdent i
 isTypeVar (Skolemized i _ _) = isTypeIdent i
 
 instance PrettyLambda Var (TT m) where
-  prettyAbs i a | isTypeVar i = (text "forall " <> prettyVar i) <+> text "." <+> pretty a
-  prettyAbs i a = (text "\\" <> prettyVar i) <+> text "->" <+> pretty a
+  prettyAbs i a | isTypeVar i = text "(forall " <> prettyVar i <+> text "." <+> pretty a <> text ")"
+  prettyAbs i a = text "(\\" <> prettyVar i <+> text "->" <+> pretty a <> text ")"
   prettyApp (In (App (In (Cat Arrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"
-  prettyApp f a = text "(" <+> pretty f <+> pretty a <+> text ")"
+  prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
   prettyCat (Bottom e) = text "Bottom" <+> text e
@@ -334,23 +330,16 @@ instance
   -- should the type of the arrow be the max of the types of the domain/codomain i.e. (* -> * :: **)
   -- currently it is always * which is simple but probably wrong for some definition of wrong 
   -- TODO read more about Girard's paradox and implementations of cumulativity constraints
-  unify (Star i) (Star j) = pure unit
+  unify (Star _) (Star _) = pure unit
   unify (TypeAnnotation a ak) (TypeAnnotation b bk) = unify ak bk  *> unify a b
-  unify (TypeAnnotation a k) b = unify a (cat b)
-  unify a (TypeAnnotation b k) = unify (cat a) b
+  unify (TypeAnnotation a _) b = unify a (cat b)
+  unify a (TypeAnnotation b _) = unify (cat a) b
   unify TypeInt TypeInt = pure unit
   unify TypeNumber TypeNumber = pure unit
   unify TypeEffect TypeEffect = pure unit
   unify a b = throwError $ unificationError (cat a) (cat b)
 
-instance 
-  ( MonadRec m
-  , Evaluate Mu Var (TT n) m
-  , MonadEffect m
-  ) => MachineFault Mu Var (TT n) Map m where
-  contextFault _ v = pure $ Done $ Bottom $ "Variable `" <> prettyPrint v <> "` not in scope."
-  stackFault _ _ = pure $ Done $ Bottom "Stack fault"
-  
+ 
 
 instance
   ( Monad m
@@ -368,42 +357,7 @@ instance
     (t' :: Cofree (LambdaF Var (TT n)) (Term n)) <- v
     _ <- unify (t :: Term n) (head t' :: Term n)
     pure (t :< tail t')
-  inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Bottom $ show (prettyPrint n.nativeType)) -- (Native (Purescript n))
-
-instance
-  ( Monad m
-  , Skolemize Mu Var (TT n)
-  ) => Evaluate Mu Var (TT n) m where
-  thunk (Native n@(Purescript { nativeType, nativeTerm })) =
-    case project nativeType of
-      App (In (Cat TypeEffect)) ret -> do
-        res <- (unsafeCoerce nativeTerm :: m (forall a. a))
-        pure $ Native (Purescript { nativeType: ret, nativeTerm: res })
-      _ -> pure $ Native n
-  thunk TypeInt = pure TypeInt
-  thunk e = pure $ Bottom $ "Machine terminated on a non-thunk object: " <> show (const unit <$> e)
-
-  functor (Native (Purescript { nativeTerm, nativeType })) arg =
-    case project nativeType of
-      -- Value level lambda application
-      App (In (App (In (Cat Arrow)) _)) ret -> 
-        case arg of
-          Native (Purescript argTerm) ->
-            pure $ cat $ Native $ Purescript { nativeTerm: nativeTerm argTerm.nativeTerm , nativeType: ret }
-          _ -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType <> "` to unwrappable " <> show arg
-      -- Type level lambda application
-      Abs v b -> do
-         -- TODO maintain the unification context from when the program the machine is running was inferred
-         -- (runUnification should be in m)
-         let ret = fst $ runUnification do
-                     unify (var v :: Term n) (cat (unsafeCoerce arg) :: Term n)
-                     rewrite b
-         case ret of
-           Left (err :: UnificationError n) -> pure $ cat $ Bottom $ "Run-time type application error: " <> show err 
-           Right rew -> pure $ cat $ Native $ Purescript { nativeTerm: unsafeCoerce nativeTerm, nativeType: rew }
-      _ -> pure $ cat $ Bottom $ "Cannot apply `_ :: " <> prettyPrint nativeType
-  functor e _ = pure $ cat $ Bottom $ "Machine applied non-functor object: " <> show (const unit <$> e)
-
+  inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
 newtype Native :: (Type -> Type) -> Type
 newtype Native m = Purescript { nativeType :: Term m, nativeTerm :: forall a. a }
