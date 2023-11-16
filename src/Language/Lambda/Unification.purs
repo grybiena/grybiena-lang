@@ -85,16 +85,10 @@ instance
        Var v /\ _ -> unify v tb
        _ /\ Var v -> unify v ta 
        Abs ab aa /\ Abs bb ba -> do
-         -- TODO skolemize with a fresh (shared) skolem
-         qv <- fresh
-         let qty :: f (LambdaF var cat)
-             qty = var qv
-         substitute ab qty
-         substitute bb qty
-         ar <- rewrite aa
-         br <- rewrite ba
-         unify ar br
-       -- TODO skolemize Abs and unify with any arbitrary type
+         sko <- fresh
+         let ska = skolemize ab sko aa
+             skb = skolemize bb sko ba
+         unify ska skb
        Abs ab aa /\ _ -> do
          sko <- fresh
          let ska = skolemize ab sko aa

@@ -94,6 +94,7 @@ instance Traversable (TT m) where
 
 instance Skolemize Mu Var (TT m) where
   skolemize (Scoped i s) k = replace (\x -> if x == Ident i then Just (var (Skolemized i s k)) else Nothing) 
+  -- TODO error if the Var is not Scoped
   skolemize _ _ = identity
 
 instance Eq a => Eq (TT m a) where
