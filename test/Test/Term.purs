@@ -14,7 +14,9 @@ import Data.Show.Generic (genericShow)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
+import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
+import Effect.Class (liftEffect)
 import Language.Kernel.Effect (effectNatives)
 import Language.Kernel.Pure (pureModule)
 import Language.Lambda.Calculus (LambdaF(..))
@@ -165,9 +167,22 @@ termTests = runTest do
     testInferType "pureEffect bindEffect" "(Effect (forall t2 . (forall t3 . ((Effect t2) -> ((t2 -> (Effect t3)) -> (Effect t3))))))" 
 
 
-    testCompileEval "intPlus 1 1" 2
-    testCompileEval "intPlus (intPlus 1 1) (intPlus 1 1)" 4
-    testCompileEval "numPlus (numPlus 1.0 1.0) (numPlus 1.0 1.0)" 4.0
+    testCompileEval "intPlus 1 1" (Assert.equal 2)
+    testCompileEval "intPlus (intPlus 1 1) (intPlus 1 1)" (Assert.equal 4)
+    testCompileEval "numPlus (numPlus 1.0 1.0) (numPlus 1.0 1.0)" (Assert.equal 4.0)
+    testCompileEval "pureEffect (numPlus (numPlus 1.0 1.0) (numPlus 1.0 1.0))"
+                    (\(out :: Effect Number) -> do
+                        n <- liftEffect out
+                        Assert.equal 4.0 n
+                    )
+    testCompileEval "\\x -> pureEffect (numPlus 1.0 x)"
+                    (\(out :: Number -> Effect Number) -> do
+                        n <- liftEffect (out 3.0)
+                        Assert.equal 4.0 n
+                    )
+
+
+
 
 
 
@@ -269,13 +284,13 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
     Right _ -> pure unit
     Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> prettyPrint err) false
 
-testCompileEval :: forall t. Reify t => Eq t => Show t => String -> t -> TestSuite
-testCompileEval v t = test ("(" <> v <> ") = " <> show t) $ do
+testCompileEval :: forall t. Reify t => String -> (t -> Aff Unit) -> TestSuite
+testCompileEval v check = test v $ do
   e <- fst <$> runUnificationT do
     r <- compile v (Proxy :: Proxy t)
     case r of
       Left err -> liftAff $ Assert.assert (show err) false
-      Right su -> liftAff $ Assert.equal t su
+      Right su -> liftAff $ check su
   case e of
     Right _ -> pure unit
     Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> prettyPrint err) false
