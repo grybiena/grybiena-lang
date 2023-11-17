@@ -16,7 +16,7 @@ import Language.Lambda.Calculus (absMany, app, cat, var)
 import Language.Lambda.Unification (class Fresh, fresh)
 import Language.Module (Listing, Module, moduleListing)
 import Language.Parser.Common (buildPostfixParser, languageDef)
-import Language.Type.Reify (reifyNative)
+import Language.Term.Reify (nativeTerm)
 import Language.Value.Native (Native)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
@@ -77,7 +77,7 @@ parser mod = {
     parseNumeric = (try parseNumber) <|> parseInt
     
     parseInt ::  ParserT String m Term
-    parseInt = cat <<< Native <<< reifyNative <$> integer
+    parseInt = cat <<< Native <<< nativeTerm <$> integer
      
     parseNatives ::  Fresh Int m =>  ParserT String m Term
     parseNatives = choice $ map (uncurry parseNative) kernel
@@ -86,7 +86,7 @@ parser mod = {
     parseNative name native = reserved name *> ((cat <<< Native) <$> lift native)
      
     parseNumber ::  ParserT String m Term
-    parseNumber = cat <<< Native <<< reifyNative <$> number 
+    parseNumber = cat <<< Native <<< nativeTerm <$> number 
     
     parseTypeAnnotation :: Fresh Int m => Monad m => Term -> ParserT String m Term
     parseTypeAnnotation v = do

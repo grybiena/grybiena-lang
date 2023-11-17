@@ -10,14 +10,15 @@ import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff.Class (liftAff)
-import Language.Term (Term, UnificationError, Var)
 import Language.Kernel.Effect (effectNatives)
-import Language.Kernel.Pure (pureNatives)
+import Language.Kernel.Pure (pureModule)
 import Language.Lambda.Inference (infer)
 import Language.Lambda.Reduction (elimAbs)
 import Language.Lambda.Unification (class Fresh, runUnificationT)
 import Language.Module (moduleUnion)
 import Language.Parser.Term (parser)
+import Language.Term (Term, UnificationError, Var)
+import Language.Term.Reify (nativeModule)
 import Parsing (ParseError, runParserT)
 import Parsing.String (eof)
 import Pretty.Printer (prettyPrint)
@@ -272,7 +273,7 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
 
 typeParser :: forall m.  Fresh Int m => MonadRec m => String -> m (Either ParseError Term) 
 typeParser s = runParserT s do
-  let someKernel = moduleUnion pureNatives effectNatives
+  let someKernel = moduleUnion (nativeModule pureModule) effectNatives
   v <- (parser someKernel).parseType
   eof
   pure v
@@ -280,7 +281,7 @@ typeParser s = runParserT s do
 
 termParser :: forall m.  Fresh Int m => Fresh Var m => MonadRec m => String -> m (Either ParseError Term)
 termParser s = runParserT s do
-  let someKernel = moduleUnion pureNatives effectNatives
+  let someKernel = moduleUnion (nativeModule pureModule) effectNatives
   v <- (parser someKernel).parseValue
   eof
   pure v
