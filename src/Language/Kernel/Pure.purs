@@ -1,10 +1,10 @@
-module Language.Kernel.Library.Pure where
+module Language.Kernel.Pure where
 
 import Prelude
 
 import Data.Homogeneous.Record (homogeneous)
-import Language.Grybu (Term)
-import Language.Kernel.Library (KernelLibrary)
+import Language.Term (Term)
+import Language.Module (Module)
 import Language.Type.Reify (reifyNative)
 import Language.Value.Native (Native)
 
@@ -19,11 +19,11 @@ type PureTermListing =
       , numPlus :: Void
       )
 
-pureNatives :: forall m n.
+pureNatives :: forall m.
      Applicative m
-  => KernelLibrary
+  => Module
       PureTermListing
-      (m (Native (Term n)))
+      (m (Native Term))
 pureNatives = homogeneous
   { "intPlus": pure $ reifyNative intPlus
   , "numPlus": pure $ reifyNative numPlus

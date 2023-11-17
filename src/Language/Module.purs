@@ -1,4 +1,4 @@
-module Language.Kernel.Library where
+module Language.Module where
 
 
 import Data.FoldableWithIndex (foldrWithIndex)
@@ -11,27 +11,27 @@ import Prim.RowList (class RowToList)
 import Record (union)
 import Type.Proxy (Proxy(..))
 
-type Kernel term = List (String /\ term)
+type Listing term = List (String /\ term)
 
-compileKernel :: forall ra names term .
+moduleListing :: forall ra names term .
                  ToHomogeneousRow names term ra
-              => KernelLibrary names term -> Kernel term
-compileKernel h = foldrWithIndex (\s n l -> (s /\ n):l) Nil h
+              => Module names term -> Listing term
+moduleListing h = foldrWithIndex (\s n l -> (s /\ n):l) Nil h
 
-kernelStrings :: forall names list . RowToList names list => Keys list => Proxy names -> List String
-kernelStrings _ = keysImpl (Proxy :: Proxy list)
+listingBinds :: forall names list . RowToList names list => Keys list => Proxy names -> List String
+listingBinds _ = keysImpl (Proxy :: Proxy list)
   
-type KernelLibrary names term = Homogeneous names term
+type Module names term = Homogeneous names term
 
-kernelLibraryUnion :: forall l rl r rr u ru term .
+moduleUnion :: forall l rl r rr u ru term .
                 Union rl rr ru
              => ToHomogeneousRow l term rl
              => ToHomogeneousRow r term rr
              => HomogeneousRowLabels ru term u
-             => KernelLibrary l term
-             -> KernelLibrary r term
-             -> KernelLibrary u term
-kernelLibraryUnion l r =
+             => Module l term
+             -> Module r term
+             -> Module u term
+moduleUnion l r =
   let z :: Record ru
       z = union (fromHomogeneous l) (fromHomogeneous r)
   in homogeneous z

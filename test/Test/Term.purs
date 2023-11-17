@@ -1,4 +1,4 @@
-module Test.Grybu where
+module Test.Term where
 
 import Prelude
 
@@ -10,11 +10,14 @@ import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff.Class (liftAff)
-import Language.Grybu (Term, UnificationError, Var)
+import Language.Term (Term, UnificationError, Var)
+import Language.Kernel.Effect (effectNatives)
+import Language.Kernel.Pure (pureNatives)
 import Language.Lambda.Inference (infer)
 import Language.Lambda.Reduction (elimAbs)
 import Language.Lambda.Unification (class Fresh, runUnificationT)
-import Language.Parser.Kernel (parseType, parseValue)
+import Language.Module (moduleUnion)
+import Language.Parser.Term (parser)
 import Parsing (ParseError, runParserT)
 import Parsing.String (eof)
 import Pretty.Printer (prettyPrint)
@@ -22,8 +25,8 @@ import Test.Unit (TestSuite, suite, test)
 import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
 
-grybuTests :: Effect Unit
-grybuTests = runTest do
+termTests :: Effect Unit
+termTests = runTest do
   suite "Language.Void" do
 
 --    testExpectErr "x" (NotInScope $ TermVar "x")
@@ -197,8 +200,8 @@ testInferType v t = test ("(" <> v <> ") :: " <> t) $ do
     tt <- typeParser t
     case Tuple <$> vt <*> tt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term Identity) /\ (_ :: Term Identity)) -> do
-        (i :: Term Identity) <- head <$> infer val
+      Right ((val :: Term) /\ (_ :: Term)) -> do
+        (i :: Term) <- head <$> infer val
         liftAff $ Assert.equal t (prettyPrint i)
   case e of
     Right _ -> pure unit
@@ -212,10 +215,10 @@ testInferSkiType v t = test ("(" <> v <> ") :: " <> t) $ do
     tt <- typeParser t
     case Tuple <$> vt <*> tt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term Identity) /\ (_ :: Term Identity)) -> do
+      Right ((val :: Term) /\ (_ :: Term)) -> do
         ski <- elimAbs val
 --        liftEffect $ log $ prettyPrint ski
-        (i :: Term Identity) <- head <$> infer ski
+        (i :: Term) <- head <$> infer ski
         liftAff $ Assert.equal t (prettyPrint i)
   case e of
     Right _ -> pure unit
@@ -228,8 +231,8 @@ testInferKind v t = test ("(" <> v <> ") :: " <> t) $ do
     tt <- typeParser t
     case Tuple <$> vt <*> tt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term Identity) /\ (_ :: Term Identity)) -> do
-        (i :: Term Identity) <- head <$> infer val
+      Right ((val :: Term) /\ (_ :: Term)) -> do
+        (i :: Term) <- head <$> infer val
         liftAff $ Assert.equal t (prettyPrint i)
   case e of
     Right _ -> pure unit
@@ -242,9 +245,9 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
     tt <- typeParser t
     case Tuple <$> vt <*> tt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term Identity) /\ (_ :: Term Identity)) -> do
-        (i :: Term Identity) <- head <$> infer val
-        (j :: Term Identity) <- head <$> infer i
+      Right ((val :: Term) /\ (_ :: Term)) -> do
+        (i :: Term) <- head <$> infer val
+        (j :: Term) <- head <$> infer i
         liftAff $ Assert.equal t (prettyPrint i)
         liftAff $ Assert.equal k (prettyPrint j)
   case e of
@@ -256,24 +259,29 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
 --testExpectErr v e = test ("(" <> v <> ") :: _|_") do
 --  case termParser v of
 --    Left err -> Assert.assert ("parse error: " <> show err) false
---    Right (val :: Term Identity) -> do
+--    Right (val :: Term) -> do
 --      case runInference val of
 --        Left e' -> Assert.equal e e'
---        Right (_ :: Term Identity) -> Assert.assert "Expected failure but got success" false
+--        Right (_ :: Term) -> Assert.assert "Expected failure but got success" false
 
 
 
-typeParser :: forall m n. Monad n => Fresh Int m => MonadRec m => String -> m (Either ParseError (Term n)) 
+
+
+
+
+typeParser :: forall m.  Fresh Int m => MonadRec m => String -> m (Either ParseError Term) 
 typeParser s = runParserT s do
-  v <- parseType
+  let someKernel = moduleUnion pureNatives effectNatives
+  v <- (parser someKernel).parseType
   eof
   pure v
 
 
-termParser :: forall m n. Monad n => Fresh Int m => Fresh Var m => MonadRec m => String -> m (Either ParseError (Term n))
+termParser :: forall m.  Fresh Int m => Fresh Var m => MonadRec m => String -> m (Either ParseError Term)
 termParser s = runParserT s do
-  v <- parseValue
+  let someKernel = moduleUnion pureNatives effectNatives
+  v <- (parser someKernel).parseValue
   eof
   pure v
-
 

@@ -1,29 +1,30 @@
-module Language.Kernel.Library.Effect where
+module Language.Kernel.Effect where
 
 import Prelude
 
 import Data.Homogeneous.Record (homogeneous)
-import Language.Grybu (TT(..), Var, Term)
-import Language.Kernel.Library (KernelLibrary)
+import Effect (Effect)
+import Language.Term (TT(..), Var, Term)
 import Language.Lambda.Calculus (abs, absMany, app, cat, var)
 import Language.Lambda.Inference ((:->:))
 import Language.Lambda.Unification (class Fresh, fresh)
+import Language.Module (Module)
 import Language.Value.Native (Native(..))
 import Unsafe.Coerce (unsafeCoerce)
 
 
-pureEffect :: forall n m. Monad m => Fresh Var m => Applicative n => m (Native (Term n))
+pureEffect :: forall m. Monad m => Fresh Var m => m (Native Term)
 pureEffect = do
   a <- fresh
   pure $ Purescript
     { nativeType: abs a $ var a :->: (app (cat TypeEffect) (var a))
     , nativeTerm:
-        let prim :: forall a. a -> m a
+        let prim :: forall a. a -> Effect a
             prim = pure
          in unsafeCoerce prim
     }
  
-bindEffect :: forall n m. Monad m => Fresh Var m => Bind n => m (Native (Term n))
+bindEffect :: forall m. Monad m => Fresh Var m => m (Native Term)
 bindEffect = do
   a <- fresh
   b <- fresh
@@ -33,7 +34,7 @@ bindEffect = do
              :->: (var a :->: (app (cat TypeEffect) (var b)))
              :->: (app (cat TypeEffect) (var b))
     , nativeTerm:
-        let prim :: forall a b. m a -> (a -> m b) -> m b
+        let prim :: forall a b. Effect a -> (a -> Effect b) -> Effect b
             prim = (>>=)
          in unsafeCoerce prim
     }
@@ -43,16 +44,16 @@ type EffectTermListing =
   , bindEffect :: Void
   )
  
-effectNatives :: forall m n.
+effectNatives :: forall m.
      Monad m
   => Fresh Var m
-  => Monad n
-  => KernelLibrary
+  => Module
       EffectTermListing
-      (m (Native (Term n)))
+      (m (Native Term))
 effectNatives = homogeneous
   { "pureEffect": pureEffect
   , "bindEffect": bindEffect
   }
+
 
 

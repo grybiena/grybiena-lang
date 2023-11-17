@@ -1,54 +1,35 @@
-module Language.Grybu where
+module Language.Term where
 
 import Prelude
 
-import Control.Alt ((<|>))
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
-import Control.Lazy (defer)
-import Control.Monad.Cont (lift)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.State (class MonadState)
-import Data.Array (replicate, (..))
+import Data.Array (replicate)
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
-import Data.FoldableWithIndex (foldrWithIndex)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.Homogeneous (class HomogeneousRowLabels, class ToHomogeneousRow)
-import Data.Homogeneous.Record (Homogeneous, fromHomogeneous, homogeneous)
-import Data.List (List(..), (:))
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse)
-import Data.Tuple (uncurry)
-import Data.Tuple.Nested (type (/\), (/\))
-import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Console (log)
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, replace, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), cat, prettyVar, replace, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class Shadow, arrow, (:->:))
 import Language.Lambda.Reduction (class Basis)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, fresh, fromInt, substitute, unificationError, unify)
-import Language.Parser.Common (buildPostfixParser, identifier, integer, number, parens, reserved, reservedOp)
 import Language.Value.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
-import Parsing (ParserT)
-import Parsing.Combinators (choice, many1Till, try)
-import Parsing.Expr (buildExprParser)
-import Parsing.String (char)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
-import Prim.Row (class Union)
-import Record (union)
-import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
-type Term m = Lambda Var (TT m)
+type Term = Lambda Var TT
 
 
-data TT m a =
+data TT a =
   -- Types
     Star Int
   | Arrow 
@@ -59,21 +40,21 @@ data TT m a =
 
   -- Values
 
-  | TypeAnnotation a (Term m)
-  | Native (Native (Term m))
+  | TypeAnnotation a Term
+  | Native (Native Term)
 
-derive instance Generic (TT m a) _
+derive instance Generic (TT a) _
 
-instance Show a => Show (TT m a) where
+instance Show a => Show (TT a) where
   show (TypeAnnotation a t) = "TypeAnnotation " <> show a <> " " <> show t
   show e = genericShow e
 
-instance IsStar Mu Var (TT m) where
+instance IsStar Mu Var TT where
   isStar t = case project t of
                Cat (Star _) -> true
                _ -> false
 
-instance Functor (TT m) where
+instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
   map _ (Bottom e) = Bottom e
@@ -84,7 +65,7 @@ instance Functor (TT m) where
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Native n) = Native n
 
-instance Traversable (TT m) where
+instance Traversable TT where
   traverse _ Arrow = pure Arrow
   traverse _ (Star i) = pure (Star i)
   traverse _ (Bottom e) = pure (Bottom e)
@@ -95,18 +76,18 @@ instance Traversable (TT m) where
   traverse _ (Native n) = pure (Native n)
   sequence = traverse identity
 
-instance Skolemize Mu Var (TT m) where
+instance Skolemize Mu Var TT where
   skolemize (Scoped i s) k = replace (\x -> if x == Ident i then Just (var (Skolemized i s k)) else Nothing) 
   -- TODO error if the Var is not Scoped
   skolemize _ _ = identity
 
-instance Eq a => Eq (TT m a) where
+instance Eq a => Eq (TT a) where
   eq = genericEq
 
-instance Eq1 (TT m) where
+instance Eq1 TT where
   eq1 = genericEq
 
-instance Foldable (TT m) where
+instance Foldable TT where
   foldr _ b _ = b
   foldl _ b _ = b
   foldMap _ _ = mempty
@@ -169,7 +150,7 @@ isTypeVar (Ident i) = isTypeIdent i
 isTypeVar (Scoped i _) = isTypeIdent i
 isTypeVar (Skolemized i _ _) = isTypeIdent i
 
-instance PrettyLambda Var (TT m) where
+instance PrettyLambda Var TT where
   prettyAbs i a | isTypeVar i = text "(forall " <> prettyVar i <+> text "." <+> pretty a <> text ")"
   prettyAbs i a = text "(\\" <> prettyVar i <+> text "->" <+> pretty a <> text ")"
   prettyApp (In (App (In (Cat Arrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"
@@ -188,8 +169,8 @@ instance PrettyLambda Var (TT m) where
 data UnificationError m =
     NotInScope Var
   | Err String
-  | InvalidApp (Term m) (Term m)
-  | UnificationError (Term m) (Term m) 
+  | InvalidApp Term Term
+  | UnificationError Term Term 
 
 derive instance Generic (UnificationError m) _
 
@@ -205,7 +186,7 @@ instance Pretty (UnificationError m) where
 instance Eq (UnificationError m) where
   eq = genericEq
 
-instance ArrowObject ((TT m) a) where
+instance ArrowObject (TT a) where
   arrowObject = Arrow
 
 instance Enumerable Ident where
@@ -217,19 +198,19 @@ instance Enumerable Var where
 instance NotInScopeError Var (UnificationError m) where 
   notInScopeError = NotInScope
 
-instance InfiniteTypeError Var (Term m) (UnificationError m) where
+instance InfiniteTypeError Var Term (UnificationError m) where
   infiniteTypeError v t = Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
 
-instance UnificationError (Term m) (UnificationError m) where 
+instance UnificationError Term (UnificationError m) where 
   unificationError = UnificationError 
 
 
 instance
   ( MonadThrow (UnificationError n) m
   , Fresh Var m
-  , Skolemize Mu Var (TT n)
-  , MonadState (TypingContext Var Mu Var (TT n)) m
-  ) => Unify Var (Term n) m where
+  , Skolemize Mu Var TT
+  , MonadState (TypingContext Var Mu Var TT) m
+  ) => Unify Var Term m where
   unify v@(Ident i) t =
     case project t of
       Var (Ident j) | i == j -> pure unit
@@ -244,9 +225,9 @@ instance
 instance
   ( MonadThrow (UnificationError n) m
   , Fresh Var m
-  , Skolemize Mu Var (TT n)
-  , MonadState (TypingContext Var Mu Var (TT n)) m
-  ) => Unify (TT n (Term n)) (TT n (Term n)) m where
+  , Skolemize Mu Var TT
+  , MonadState (TypingContext Var Mu Var TT) m
+  ) => Unify (TT Term) (TT Term) m where
   unify Arrow Arrow = pure unit
   -- TODO concerned that our hierarchy of type universes may permit paradox
   -- should the type of the arrow be the max of the types of the domain/codomain i.e. (* -> * :: **)
@@ -265,10 +246,10 @@ instance
 
 instance
   ( Monad m
-  , Unify (Term n) (Term n) m
-  , MonadState (TypingContext Var Mu Var (TT n)) m
+  , Unify Term Term m
+  , MonadState (TypingContext Var Mu Var TT) m
   , MonadThrow (UnificationError n) m
-  ) => Inference Var (TT n) (Term n) m where
+  ) => Inference Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
   inference (Bottom e) = pure (cat (Bottom e) :< Cat (Bottom e))
@@ -277,15 +258,15 @@ instance
   inference TypeEffect = pure $ arrow (cat (Star 1)) (cat (Star 1)) :< Cat TypeEffect
 
   inference (TypeAnnotation v t) = do
-    (t' :: Cofree (LambdaF Var (TT n)) (Term n)) <- v
-    unify (t :: Term n) (head t' :: Term n)
+    (t' :: Cofree (LambdaF Var TT) Term) <- v
+    unify (t :: Term) (head t' :: Term)
     pure (t :< tail t')
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
 instance
   ( Monad n
   , Fresh Var n
-  ) => Basis (TT m) n where
+  ) => Basis TT n where
   basisS = do
     a <- fresh
     b <- fresh

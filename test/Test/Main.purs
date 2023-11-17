@@ -3,8 +3,8 @@ module Test.Main where
 import Prelude
 
 import Effect (Effect)
-import Test.Grybu (grybuTests)
+import Test.Term (termTests)
 
 main :: Effect Unit
-main = grybuTests
+main = termTests
 
