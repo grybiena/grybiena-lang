@@ -68,7 +68,7 @@ parser mod = {
     parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
     
     parseValueAtom ::  Fresh Int m => Fresh Var m =>  ParserT String m Term
-    parseValueAtom = defer $ \_ -> parseAbs <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseNatives <|> parseTypeLit <|> (parens parseValue)
+    parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> (parens parseValue)
     
     parseTypeLit :: Monad m => ParserT String m Term
     parseTypeLit = char '@' *> parseTypeAtom 

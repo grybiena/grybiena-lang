@@ -142,13 +142,13 @@ onVar :: forall var cat f .
      -> Algebra (LambdaF var cat) (f (LambdaF var cat))
 onVar replacement =
   case _ of
---    Abs v a ->
---      case project <$> replacement v of
---        Just (Var v') -> abs v' a
---        Just _ -> a
---        _ -> abs v a
-    Abs v a | isJust (replacement v) -> a
-    Abs v a -> abs v a
+    Abs v a ->
+      case project <$> replacement v of
+        Just (Var v') -> abs v' a
+        Just _ -> a
+        _ -> abs v a
+--    Abs v a | isJust (replacement v) -> a
+--    Abs v a -> abs v a
     Var v -> maybe (var v) identity (replacement v)
     App a b -> app a b
     Cat c -> cat c

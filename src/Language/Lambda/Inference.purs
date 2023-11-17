@@ -10,7 +10,7 @@ import Data.Foldable (class Foldable)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF(..), app, cat, var)
-import Language.Lambda.Unification (class Context, class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Rewrite, class UnificationError, class Unify, TypingContext, assume, fresh, require, rewrite, runUnification, unify)
+import Language.Lambda.Unification (class Context, class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Rewrite, class Shadow, class UnificationError, class Unify, TypingContext, assume, fresh, require, rewrite, runUnification, shadow, unify)
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
@@ -84,9 +84,6 @@ rule expr =
 
 class Inference var cat typ m where
   inference :: cat (m (Cofree (LambdaF var cat) typ)) -> m (Cofree (LambdaF var cat) typ)
-
-class Shadow var where
-  shadow :: var -> var
 
 absRule :: forall m typ var cat.
            Bind m

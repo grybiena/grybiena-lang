@@ -16,10 +16,11 @@ import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse)
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), cat, prettyVar, replace, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class Shadow, arrow, (:->:))
-import Language.Lambda.Reduction (class Basis)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, fresh, fromInt, substitute, unificationError, unify)
+import Data.Tuple.Nested ((/\))
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), app, cat, prettyVar, replace, var)
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, (:->:))
+import Language.Lambda.Reduction (class Basis, class Composition, reduce)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Shadow, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, fresh, fromInt, substitute, unificationError, unify)
 import Language.Value.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (text, (<+>))
@@ -166,6 +167,7 @@ instance PrettyLambda Var TT where
   prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
 
 
+data UnificationError :: forall k. k -> Type
 data UnificationError m =
     NotInScope Var
   | Err String
@@ -297,5 +299,16 @@ instance
               prim = identity
            in unsafeCoerce prim
       }
+
+instance Composition Mu Var TT where
+  composition a b =
+    case project a /\ project b of
+      Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) ->
+        cat (Native (Purescript { nativeType: reduce (app na.nativeType nb.nativeType)
+                                , nativeTerm: na.nativeTerm nb.nativeTerm
+                                }))
+      -- TODO reduce via unification
+      App (In (App (In (Cat Arrow)) ta)) tb /\ _ | ta == b -> tb
+      _ -> app a b 
 
 

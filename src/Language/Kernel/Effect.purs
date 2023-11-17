@@ -4,13 +4,14 @@ import Prelude
 
 import Data.Homogeneous.Record (homogeneous)
 import Effect (Effect)
-import Language.Term (TT(..), Var, Term)
 import Language.Lambda.Calculus (abs, absMany, app, cat, var)
 import Language.Lambda.Inference ((:->:))
 import Language.Lambda.Unification (class Fresh, fresh)
 import Language.Module (Module)
+import Language.Term (TT(..), Var, Term)
 import Language.Value.Native (Native(..))
 import Unsafe.Coerce (unsafeCoerce)
+
 
 
 pureEffect :: forall m. Monad m => Fresh Var m => m (Native Term)
@@ -26,6 +27,9 @@ pureEffect = do
  
 bindEffect :: forall m. Monad m => Fresh Var m => m (Native Term)
 bindEffect = do
+  --TODO use the parser
+  --t <- parseType "Effect a -> (a -> Effect b) -> Effect b"
+  --nativeType <- renameFresh t
   a <- fresh
   b <- fresh
   pure $ Purescript

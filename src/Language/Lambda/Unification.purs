@@ -7,11 +7,14 @@ import Control.Monad.Except.Trans (class MonadThrow)
 import Control.Monad.State (class MonadState, State, StateT, get, modify, modify_, runState, runStateT)
 import Data.Either (Either)
 import Data.Foldable (class Foldable)
+import Data.List (fromFoldable)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
+import Data.Set as Set
+import Data.Traversable (traverse)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (LambdaF(..), occursIn, replace, var)
+import Language.Lambda.Calculus (LambdaF(..), occursIn, replace, universe, var)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
@@ -193,5 +196,29 @@ instance
   substitution = do
     st <- get
     pure $ flip Map.lookup st.currentSubstitution
+
+-- Variables can have added context (e.g. scope, skolem constant) which shadow removes
+class Shadow var where
+  shadow :: var -> var
+
+-- | Rename all of the bindings and variables with fresh ones
+-- without incurring any substitutions (the new variables will be unique to the term)
+-- TODO shadow
+renameFresh :: forall f var cat m.
+       Monad m
+    => Ord var
+    => Shadow var
+    => Foldable cat
+    => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+    => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+    => Fresh var m
+    => Substitute var cat f m
+    => f (LambdaF var cat) -> m (f (LambdaF var cat))
+renameFresh t = do
+  r <- flip traverse (fromFoldable $ Set.map shadow $ universe t) $ \v -> do
+    x <- fresh
+    pure (v /\ (var x :: f (LambdaF var cat)))
+  let re = Map.fromFoldable r
+  pure $ replace (\v -> Map.lookup (shadow v) re) t
 
 

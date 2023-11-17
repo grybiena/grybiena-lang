@@ -5,26 +5,33 @@ import Prelude
 import Control.Comonad.Cofree (head)
 import Control.Monad.Rec.Class (class MonadRec)
 import Data.Either (Either(..))
+import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity)
+import Data.Show.Generic (genericShow)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff.Class (liftAff)
 import Language.Kernel.Effect (effectNatives)
 import Language.Kernel.Pure (pureModule)
+import Language.Lambda.Calculus (LambdaF(..))
 import Language.Lambda.Inference (infer)
-import Language.Lambda.Reduction (elimAbs)
+import Language.Lambda.Reduction (elimAbs, reduce)
 import Language.Lambda.Unification (class Fresh, runUnificationT)
 import Language.Module (moduleUnion)
 import Language.Parser.Term (parser)
-import Language.Term (Term, UnificationError, Var)
-import Language.Term.Reify (nativeModule)
+import Language.Term (TT(..), Term, UnificationError, Var)
+import Language.Term.Reify (class Reify, nativeModule, reify)
+import Language.Value.Native (Native(..))
+import Matryoshka.Class.Recursive (project)
 import Parsing (ParseError, runParserT)
 import Parsing.String (eof)
 import Pretty.Printer (prettyPrint)
 import Test.Unit (TestSuite, suite, test)
 import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
+import Type.Proxy (Proxy(..))
+import Unsafe.Coerce (unsafeCoerce)
 
 termTests :: Effect Unit
 termTests = runTest do
@@ -155,6 +162,8 @@ termTests = runTest do
     testInferType "pureEffect bindEffect" "(Effect (forall t2 . (forall t3 . ((Effect t2) -> ((t2 -> (Effect t3)) -> (Effect t3))))))" 
 
 
+    testCompileEval "intPlus 1 1" 2
+    testCompileEval "intPlus (intPlus 1 1) (intPlus 1 1)" 4
 
 
 --    testInferSkiType "\\x y -> bindEffect @Int x y" "((Effect Int) -> (t4 -> ((Int -> ( Effect x )) -> ( Effect x ))))"
@@ -255,6 +264,18 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
     Right _ -> pure unit
     Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> prettyPrint err) false
 
+testCompileEval :: forall t. Reify t => Eq t => Show t => String -> t -> TestSuite
+testCompileEval v t = test ("(" <> v <> ") = " <> show t) $ do
+  e <- fst <$> runUnificationT do
+    r <- compile v (Proxy :: Proxy t)
+    case r of
+      Left err -> liftAff $ Assert.assert (show err) false
+      Right su -> liftAff $ Assert.equal t su
+  case e of
+    Right _ -> pure unit
+    Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> prettyPrint err) false
+
+
 
 --testExpectErr :: String -> UnificationError Identity -> TestSuite
 --testExpectErr v e = test ("(" <> v <> ") :: _|_") do
@@ -265,8 +286,29 @@ testInferTypeThenKind v t k = test ("(" <> v <> ") :: " <> t) $ do
 --        Left e' -> Assert.equal e e'
 --        Right (_ :: Term) -> Assert.assert "Expected failure but got success" false
 
+data CompileError =
+    ReductionError String
+  | TypeError String
+  | ParseError ParseError
 
+derive instance Generic CompileError _
+instance Show CompileError where
+  show = genericShow
 
+compile :: forall t m. Reify t => Fresh Int m => MonadRec m => String -> Proxy t -> m (Either CompileError t) 
+compile s ty = do
+    t <- termParser s
+    case t of
+      Left err -> pure $ Left $ ParseError err
+      Right val -> do
+        ski <- reduce <$> elimAbs val
+        case project ski of
+          Cat (Native (Purescript { nativeType, nativeTerm })) -> do
+            let tyt = reify ty
+            if tyt == nativeType
+              then pure $ Right $ unsafeCoerce nativeTerm
+              else pure $ Left $ TypeError $ "Wrong type: " <> prettyPrint nativeType
+          _ -> pure $ Left $ ReductionError $ "Not reduced to native: " <> show ski
 
 
 
