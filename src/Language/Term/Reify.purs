@@ -1,15 +1,17 @@
 module Language.Term.Reify where
 
 import Control.Alternative (class Applicative, pure)
-import Control.Category ((<<<))
 import Data.Homogeneous (class HomogeneousRowLabels)
 import Data.Homogeneous.Record (homogeneous)
+import Data.Symbol (class IsSymbol, reflectSymbol)
 import Effect (Effect)
-import Heterogeneous.Mapping (class MapRecordWithIndex, class Mapping, ConstMapping, hmap)
+import Heterogeneous.Mapping (class MapRecordWithIndex, class MappingWithIndex, hmapWithIndex)
 import Language.Lambda.Calculus (app, cat)
 import Language.Module (Module)
 import Language.Term (TT(..), Term)
+import Language.Type (Type, primitiveTypeConstructors)
 import Language.Value.Native (Native(..))
+import Prim (Constraint, Int, Number, Record, String)
 import Prim.RowList (class RowToList)
 import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
@@ -18,20 +20,20 @@ nativeModule :: forall m mod names het listing.
      Applicative m
   => HomogeneousRowLabels het (m (Native Term)) listing 
   => RowToList mod names 
-  => MapRecordWithIndex names (ConstMapping NativeTerm) mod het 
+  => MapRecordWithIndex names NativeTerm mod het 
   => Record mod 
   -> Module listing (m (Native Term))
-nativeModule r = let (x :: Record het) = hmap NativeTerm r in homogeneous x 
-
+nativeModule r = let (x :: Record het) = hmapWithIndex NativeTerm r in homogeneous x 
 
 data NativeTerm = NativeTerm
 
-instance (Reify native, Applicative m) => Mapping NativeTerm native (m (Native Term)) where
-  mapping NativeTerm = pure <<< nativeTerm
+instance (Reify native, IsSymbol sym, Applicative m) => MappingWithIndex NativeTerm (Proxy sym) native (m (Native Term)) where
+  mappingWithIndex NativeTerm = \i t -> pure (nativeTerm (reflectSymbol i) t)
 
-nativeTerm :: forall t . Reify t => t -> Native Term
-nativeTerm term = Purescript
+nativeTerm :: forall t . Reify t => String -> t -> Native Term
+nativeTerm nativePretty term = Purescript
   { nativeType: reify (Proxy :: Proxy t)
+  , nativePretty
   , nativeTerm: unsafeCoerce term
   }
 
@@ -44,13 +46,16 @@ instance Reify (->) where
   reify _ = cat Arrow
 
 instance Reify Effect where
-  reify _ = cat TypeEffect
+  reify _ = cat (Native (nativeTerm "Effect" primitiveTypeConstructors."Effect"))
+
+instance Reify Type where
+  reify _ = cat (Star 1)
 
 instance Reify Int where
-  reify _ = cat TypeInt
+  reify _ = cat (Native (nativeTerm "Int" primitiveTypeConstructors."Int"))
 
 instance Reify Number where
-  reify _ = cat TypeNumber
+  reify _ = cat (Native (nativeTerm "Number" primitiveTypeConstructors."Number"))
 
 instance (Reify a, Reify b) => Reify (a b) where
   reify _ = app (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b))

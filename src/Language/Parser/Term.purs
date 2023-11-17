@@ -11,18 +11,20 @@ import Data.Homogeneous (class ToHomogeneousRow)
 import Data.List ((..))
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (fst, uncurry)
-import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
+import Effect (Effect)
 import Language.Lambda.Calculus (absMany, app, cat, var)
 import Language.Lambda.Unification (class Fresh, fresh)
 import Language.Module (Listing, Module, moduleListing)
 import Language.Parser.Common (buildPostfixParser, languageDef)
-import Language.Term.Reify (nativeTerm)
+import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
+import Language.Term.Reify (nativeTerm, reify)
 import Language.Value.Native (Native)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
 import Parsing.String (char)
 import Parsing.Token (GenTokenParser, makeTokenParser)
+import Type.Proxy (Proxy(..))
 
 type Parser m =
   { parseValue:: ParserT String m Term
@@ -77,7 +79,7 @@ parser mod = {
     parseNumeric = (try parseNumber) <|> parseInt
     
     parseInt ::  ParserT String m Term
-    parseInt = cat <<< Native <<< nativeTerm <$> integer
+    parseInt = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> integer
      
     parseNatives ::  Fresh Int m =>  ParserT String m Term
     parseNatives = choice $ map (uncurry parseNative) kernel
@@ -86,7 +88,7 @@ parser mod = {
     parseNative name native = reserved name *> ((cat <<< Native) <$> lift native)
      
     parseNumber ::  ParserT String m Term
-    parseNumber = cat <<< Native <<< nativeTerm <$> number 
+    parseNumber = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> number 
     
     parseTypeAnnotation :: Fresh Int m => Monad m => Term -> ParserT String m Term
     parseTypeAnnotation v = do
@@ -109,13 +111,13 @@ parser mod = {
     parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< Ident <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType)
     
     parseTypeInt ::  ParserT String m Term
-    parseTypeInt = reserved "Int" *> pure (cat TypeInt)
+    parseTypeInt = reserved "Int" *> pure (reify (Proxy :: Proxy Int))
      
     parseTypeNumber :: ParserT String m Term
-    parseTypeNumber = reserved "Number" *> pure (cat TypeNumber)
+    parseTypeNumber = reserved "Number" *> pure (reify (Proxy :: Proxy Number))
       
     parseTypeEffect ::  ParserT String m Term
-    parseTypeEffect = reserved "Effect" *> pure (cat TypeEffect)
+    parseTypeEffect = reserved "Effect" *> pure (reify (Proxy :: Proxy Effect))
     
     
     parseTypeArrow :: Term -> ParserT String m Term
@@ -143,3 +145,4 @@ parser mod = {
     parseTypeApp :: Term -> ParserT String m Term
     parseTypeApp v = app v <$> parseTypeAtom
     
+

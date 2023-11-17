@@ -25,22 +25,15 @@ import Language.Value.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
+import Prim (Boolean, Int, Number, Record, String)
 import Unsafe.Coerce (unsafeCoerce)
 
 type Term = Lambda Var TT
 
 
 data TT a =
-  -- Types
     Star Int
-  | Arrow 
-  | Bottom String
-  | TypeInt
-  | TypeNumber
-  | TypeEffect
-
-  -- Values
-
+  | Arrow
   | TypeAnnotation a Term
   | Native (Native Term)
 
@@ -58,10 +51,6 @@ instance IsStar Mu Var TT where
 instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
-  map _ (Bottom e) = Bottom e
-  map _ TypeInt = TypeInt
-  map _ TypeNumber = TypeNumber
-  map _ TypeEffect = TypeEffect
 
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Native n) = Native n
@@ -69,10 +58,6 @@ instance Functor TT where
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
   traverse _ (Star i) = pure (Star i)
-  traverse _ (Bottom e) = pure (Bottom e)
-  traverse _ TypeInt = pure TypeInt
-  traverse _ TypeNumber = pure TypeNumber
-  traverse _ TypeEffect = pure TypeEffect
   traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> (f a)
   traverse _ (Native n) = pure (Native n)
   sequence = traverse identity
@@ -158,16 +143,12 @@ instance PrettyLambda Var TT where
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
-  prettyCat (Bottom e) = text "Bottom" <+> text e
-  prettyCat TypeInt = text "Int"
-  prettyCat TypeNumber = text "Number"
-  prettyCat TypeEffect = text "Effect" 
-
   prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
-  prettyCat (Native (Purescript { nativeType })) = text "(_ :: " <> pretty nativeType <> text ")"
+  prettyCat (Native (Purescript { nativePretty })) = text nativePretty
 
 
-data UnificationError :: forall k. k -> Type
+
+data UnificationError :: forall k. k -> Prim.Type
 data UnificationError m =
     NotInScope Var
   | Err String
@@ -189,7 +170,7 @@ instance Eq (UnificationError m) where
   eq = genericEq
 
 instance ArrowObject (TT a) where
-  arrowObject = Arrow
+  arrowObject = Arrow 
 
 instance Enumerable Ident where
   fromInt i = TypeVar ("t" <> show i)
@@ -239,9 +220,10 @@ instance
   unify (TypeAnnotation a ak) (TypeAnnotation b bk) = unify ak bk  *> unify a b
   unify (TypeAnnotation a _) b = unify a (cat b)
   unify a (TypeAnnotation b _) = unify (cat a) b
-  unify TypeInt TypeInt = pure unit
-  unify TypeNumber TypeNumber = pure unit
-  unify TypeEffect TypeEffect = pure unit
+  unify a@(Native (Purescript na)) b@(Native (Purescript nb)) = do
+    unify na.nativeType nb.nativeType
+    when (na.nativePretty /= nb.nativePretty) do
+       throwError $ unificationError (cat a) (cat b)
   unify a b = throwError $ unificationError (cat a) (cat b)
 
  
@@ -254,11 +236,6 @@ instance
   ) => Inference Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
-  inference (Bottom e) = pure (cat (Bottom e) :< Cat (Bottom e))
-  inference TypeInt = pure $ (cat (Star 1) :< Cat TypeInt)
-  inference TypeNumber = pure $ cat (Star 1) :< Cat TypeNumber
-  inference TypeEffect = pure $ arrow (cat (Star 1)) (cat (Star 1)) :< Cat TypeEffect
-
   inference (TypeAnnotation v t) = do
     (t' :: Cofree (LambdaF Var TT) Term) <- v
     unify (t :: Term) (head t' :: Term)
@@ -275,6 +252,7 @@ instance
     c <- fresh
     pure $ Native $ Purescript
       { nativeType: ((var a :->: var b :->: var c) :->: (var a :->: var b) :->: var a :->: var c)
+      , nativePretty: "S"
       , nativeTerm:
           let prim :: forall a b c. (a -> b -> c) -> (a -> b) -> a -> c 
               prim x y z = x z (y z)
@@ -285,6 +263,7 @@ instance
     b <- fresh
     pure $ Native $ Purescript
       { nativeType: (var a :->: var b :->: var a)
+      , nativePretty: "K"
       , nativeTerm:
           let prim :: forall a b. a -> b -> a
               prim = const
@@ -294,6 +273,7 @@ instance
     a <- fresh
     pure $ Native $ Purescript
       { nativeType: (var a :->: var a)
+      , nativePretty: "I"
       , nativeTerm:
           let prim :: forall a. a -> a
               prim = identity
@@ -310,7 +290,9 @@ instance
     case project a /\ project b of
       Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) -> do
         nativeType <- head <$> infer (app a b)
-        pure $ cat (Native (Purescript { nativeType, nativeTerm: na.nativeTerm nb.nativeTerm }))
+        pure $ cat (Native (Purescript { nativeType
+                                       , nativePretty: "(" <> na.nativePretty <> " " <> nb.nativePretty <> ")"
+                                       , nativeTerm: na.nativeTerm nb.nativeTerm
+                                       }))
       _ -> pure $ app a b 
-
 
