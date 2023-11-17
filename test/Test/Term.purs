@@ -102,9 +102,6 @@ termTests = runTest do
     testInferType "1 :: Int :: *" "(Int :: *)" 
 
 
-
-
-
     testInferKind "forall a . a" "(t2 -> t2)"
     testInferKind "forall a b. a b" "((t4 -> t6) -> (t4 -> t6))"
     testInferKind "forall a b. b a" "(t3 -> ((t3 -> t6) -> t6))" 
@@ -120,20 +117,7 @@ termTests = runTest do
     testInferKind "Int" "*"
     testInferKind "Number" "*"
 
---
-----    testRun "1" (Native $ int 1)
-----    testRun "1.0" (Native $ num 1.0)
-----    testRun "intPlus 1 1" (Native $ int 2)
-----    testRun "intPlus (intPlus 1 1) (intPlus 1 1)" (Native $ int 4)
-----
-----    testRun "numPlus 1.0 1.0" (Native $ num 2.0)
-----
-----    testRun "numPlus (numPlus 99.9 0.001) (numPlus 0.0004 0.0005)" (Native $ num 99.90190000000001)
---
-----    testRun "intPlus (1 1)" (Native $ int 4)
--- 
---
----- Pure
+    -- Effect
     testInferType "pureEffect" "(forall t1 . (t1 -> (Effect t1)))"
     testInferSkiType "pureEffect" "(forall t1 . (t1 -> (Effect t1)))"
 
@@ -167,6 +151,7 @@ termTests = runTest do
     testInferType "pureEffect bindEffect" "(Effect (forall t2 . (forall t3 . ((Effect t2) -> ((t2 -> (Effect t3)) -> (Effect t3))))))" 
 
 
+    -- Compile
     testCompileEval "intPlus 1 1" (Assert.equal 2)
     testCompileEval "intPlus (intPlus 1 1) (intPlus 1 1)" (Assert.equal 4)
     testCompileEval "numPlus (numPlus 1.0 1.0) (numPlus 1.0 1.0)" (Assert.equal 4.0)
@@ -181,47 +166,6 @@ termTests = runTest do
                         Assert.equal 4.0 n
                     )
 
-
-
-
-
-
---    testInferSkiType "\\x y -> bindEffect @Int x y" "((Effect Int) -> (t4 -> ((Int -> ( Effect x )) -> ( Effect x ))))"
---
---
---
---
---    testInferTypeThenKind "pureEffect @Int" "Int -> Effect Int" "*"
-
-
---    testRunEffectInt "pureEffect @Int 1" 1
---
---    testRunEffectInt "bindEffect @Int @Int (pureEffect @Int 1) (pureEffect @Int)" 1
--- 
---    testRunEffectInt "bindEffect @Int @Int (pureEffect @Int 1) (\\a -> pureEffect @Int a)" 1
-
---    testRun "bindEffect @Int @Int (pureEffect @Int 1) (\\z -> bindEffect @Int @Int (pureEffect @Int (intPlus z 1)) (\\b -> pureEffect @Int (intPlus b 1)))" (Native $ int 3)
---    testInferType "bindEffect @Int @Int (pureEffect @Int 1) (\\z -> bindEffect @Int @Int (pureEffect @Int (intPlus z 1)) (\\b -> pureEffect @Int (intPlus b 1)))" "Effect Int"
---
---
---    testRun "bindEffect @Int @Int (bindEffect @Int @Int (pureEffect @Int 1) (\\a -> pureEffect @Int (intPlus a 1))) (\\b -> pureEffect @Int (intPlus b 1))" (Native $ int 3)
---    testInferType "bindEffect @Int @Int (bindEffect @Int @Int (pureEffect @Int 1) (\\a -> pureEffect @Int (intPlus a 1))) (\\b -> pureEffect @Int (intPlus b 1))" "Effect Int"
-
-
-
----- Bind
---    testInferType "bindEffect" "forall b a. Effect a -> (a -> Effect b) -> Effect b"
---    testInferType "bindEffect" "forall a b. Effect a -> (a -> Effect b) -> Effect b"
---
---
---    -- TODO this should fail
---    testInferType "bindEffect" "forall x y. Effect a -> (a -> Effect b) -> Effect b"
---
---    -- TODO this should pass
---    testInferTypeThenKind "\\x -> x" "a -> a"
---
---    -- TODO this is fails correctly
---    testInferTypeThenKind "pureEffect 1" "Int -> Effect Int"
 
 testInferType :: String -> String -> TestSuite
 testInferType v t = test ("(" <> v <> ") :: " <> t) $ do
