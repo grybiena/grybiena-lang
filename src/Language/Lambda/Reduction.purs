@@ -5,37 +5,39 @@ module Language.Lambda.Reduction where
 import Prelude
 
 import Data.Traversable (class Traversable, traverse)
-import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (LambdaF(..), abs, app, cat, freeIn, var)
-import Matryoshka.Algebra (Algebra)
+import Matryoshka.Algebra (AlgebraM)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
-import Matryoshka.Fold (cata)
+import Matryoshka.Fold (cataM)
 
-class Composition f var cat where 
+class Composition f var cat m where 
   composition :: f (LambdaF var cat)
           -> f (LambdaF var cat)
-          -> f (LambdaF var cat)
+          -> m (f (LambdaF var cat))
  
-reduce :: forall f var cat.
+reduce :: forall f var cat m.
              Recursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
-         => Composition f var cat
+         => Composition f var cat m
          => Eq (f (LambdaF var cat))
-         => f (LambdaF var cat) -> f (LambdaF var cat)
-reduce = cata reduction
+         => Monad m
+         => Traversable cat
+         => f (LambdaF var cat) -> m (f (LambdaF var cat))
+reduce = cataM reduction
 
-reduction :: forall f var cat.
+reduction :: forall f var cat m.
              Recursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
-         => Composition f var cat
-         => Algebra (LambdaF var cat) (f (LambdaF var cat))
+         => Composition f var cat m
+         => Applicative m
+         => AlgebraM m (LambdaF var cat) (f (LambdaF var cat))
 reduction =
   case _ of
-    Var v -> var v
-    Abs x e -> abs x e
+    Var v -> pure $ var v
+    Abs x e -> pure $ abs x e
     App a b -> composition a b
-    Cat c -> cat c
+    Cat c -> pure $ cat c
 
 -- TODO extend to reduce to C and B combinators 
 elimAbs :: forall f var cat m.
@@ -46,7 +48,6 @@ elimAbs :: forall f var cat m.
        => Functor cat
        => Basis cat m
        => Monad m
-       => Composition f var cat
        => Eq (f (LambdaF var cat))
        => f (LambdaF var cat)
        -> m (f (LambdaF var cat))

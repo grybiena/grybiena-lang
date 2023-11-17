@@ -3,8 +3,11 @@ module Test.Term where
 import Prelude
 
 import Control.Comonad.Cofree (head)
+import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Rec.Class (class MonadRec)
+import Control.Monad.State (class MonadState)
 import Data.Either (Either(..))
+import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
 import Data.Identity (Identity)
 import Data.Show.Generic (genericShow)
@@ -17,7 +20,7 @@ import Language.Kernel.Pure (pureModule)
 import Language.Lambda.Calculus (LambdaF(..))
 import Language.Lambda.Inference (infer)
 import Language.Lambda.Reduction (elimAbs, reduce)
-import Language.Lambda.Unification (class Fresh, runUnificationT)
+import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
 import Language.Module (moduleUnion)
 import Language.Parser.Term (parser)
 import Language.Term (TT(..), Term, UnificationError, Var)
@@ -164,6 +167,8 @@ termTests = runTest do
 
     testCompileEval "intPlus 1 1" 2
     testCompileEval "intPlus (intPlus 1 1) (intPlus 1 1)" 4
+    testCompileEval "numPlus (numPlus 1.0 1.0) (numPlus 1.0 1.0)" 4.0
+
 
 
 --    testInferSkiType "\\x y -> bindEffect @Int x y" "((Effect Int) -> (t4 -> ((Int -> ( Effect x )) -> ( Effect x ))))"
@@ -295,20 +300,26 @@ derive instance Generic CompileError _
 instance Show CompileError where
   show = genericShow
 
-compile :: forall t m. Reify t => Fresh Int m => MonadRec m => String -> Proxy t -> m (Either CompileError t) 
+compile :: forall t m.
+           Reify t
+        => MonadState (TypingContext Var Mu Var TT) m
+        => MonadThrow (UnificationError Identity) m
+        => Fresh Int m
+        => MonadRec m
+        => String -> Proxy t -> m (Either CompileError t) 
 compile s ty = do
     t <- termParser s
     case t of
       Left err -> pure $ Left $ ParseError err
       Right val -> do
-        ski <- reduce <$> elimAbs val
-        case project ski of
+        out <- elimAbs val >>= reduce
+        case project out of
           Cat (Native (Purescript { nativeType, nativeTerm })) -> do
             let tyt = reify ty
             if tyt == nativeType
               then pure $ Right $ unsafeCoerce nativeTerm
-              else pure $ Left $ TypeError $ "Wrong type: " <> prettyPrint nativeType
-          _ -> pure $ Left $ ReductionError $ "Not reduced to native: " <> show ski
+              else pure $ Left $ TypeError $ prettyPrint tyt <> " =?= " <> prettyPrint nativeType
+          _ -> pure $ Left $ ReductionError $ prettyPrint out 
 
 
 

@@ -18,8 +18,8 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), app, cat, prettyVar, replace, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, (:->:))
-import Language.Lambda.Reduction (class Basis, class Composition, reduce)
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, (:->:))
+import Language.Lambda.Reduction (class Basis, class Composition)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Shadow, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, fresh, fromInt, substitute, unificationError, unify)
 import Language.Value.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
@@ -300,15 +300,17 @@ instance
            in unsafeCoerce prim
       }
 
-instance Composition Mu Var TT where
+instance
+  ( Monad m
+  , Unify Term Term m
+  , MonadState (TypingContext Var Mu Var TT) m
+  , MonadThrow (UnificationError n) m
+  ) => Composition Mu Var TT m where
   composition a b =
     case project a /\ project b of
-      Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) ->
-        cat (Native (Purescript { nativeType: reduce (app na.nativeType nb.nativeType)
-                                , nativeTerm: na.nativeTerm nb.nativeTerm
-                                }))
-      -- TODO reduce via unification
-      App (In (App (In (Cat Arrow)) ta)) tb /\ _ | ta == b -> tb
-      _ -> app a b 
+      Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) -> do
+        nativeType <- head <$> infer (app a b)
+        pure $ cat (Native (Purescript { nativeType, nativeTerm: na.nativeTerm nb.nativeTerm }))
+      _ -> pure $ app a b 
 
 
