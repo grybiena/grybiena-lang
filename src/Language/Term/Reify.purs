@@ -42,14 +42,17 @@ class Reify :: forall k. k -> Constraint
 class Reify s where
   reify :: Proxy s -> Term
 
+instance Reify Type where
+  reify _ = cat (Star 1)
+
 instance Reify (->) where
   reify _ = cat Arrow
 
+instance (Reify a, Reify b) => Reify (a b) where
+  reify _ = app (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b))
+
 instance Reify Effect where
   reify _ = cat (Native (nativeTerm "Effect" primitiveTypeConstructors."Effect"))
-
-instance Reify Type where
-  reify _ = cat (Star 1)
 
 instance Reify Int where
   reify _ = cat (Native (nativeTerm "Int" primitiveTypeConstructors."Int"))
@@ -57,6 +60,4 @@ instance Reify Int where
 instance Reify Number where
   reify _ = cat (Native (nativeTerm "Number" primitiveTypeConstructors."Number"))
 
-instance (Reify a, Reify b) => Reify (a b) where
-  reify _ = app (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b))
 

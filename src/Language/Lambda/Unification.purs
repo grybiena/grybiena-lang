@@ -203,7 +203,6 @@ class Shadow var where
 
 -- | Rename all of the bindings and variables with fresh ones
 -- without incurring any substitutions (the new variables will be unique to the term)
--- TODO shadow
 renameFresh :: forall f var cat m.
        Monad m
     => Ord var

@@ -26,10 +26,12 @@ primitiveTypeConstructors :: Record
   ( "Int" :: Type
   , "Number" :: Type
   , "Effect" :: Type -> Type
+  , "Maybe" :: Type -> Type
   )
 primitiveTypeConstructors = 
   { "Int": TypeConstructor "Int"
   , "Number": TypeConstructor "Number"
   , "Effect": TypeApp (TypeConstructor "Effect")
+  , "Maybe": TypeApp (TypeConstructor "Maybe")
   }
 

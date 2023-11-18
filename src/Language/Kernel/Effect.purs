@@ -32,13 +32,8 @@ pureEffect = do
  
 bindEffect :: forall m. Monad m => Fresh Var m => m (Native Term)
 bindEffect = do
-  --TODO use the parser
-  --t <- parseType "Effect a -> (a -> Effect b) -> Effect b"
-  --nativeType <- renameFresh t
-
   let typeEffect :: Term
       typeEffect = reify (Proxy :: Proxy Effect)
-
   a <- fresh
   b <- fresh
   pure $ Purescript
