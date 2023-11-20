@@ -3,6 +3,7 @@ module Test.Term where
 import Prelude
 
 import Control.Comonad.Cofree (head)
+import Control.Lazy (fix)
 import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
@@ -38,9 +39,54 @@ import Test.Unit.Main (runTest)
 import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
+testFix :: TestSuite
+testFix = test "fix" $ do
+  let foo :: Int -> Int
+      foo i | i == 0 = 0
+      foo i | i > 0 = foo (i-1)
+      foo i = foo (i+1)
+      foo' :: (Int -> Int) -> Int -> Int
+      foo' _ i | i == 0 = 0
+      foo' f i | i > 0 = f (i-1)
+      foo' f i = f (i+1)
+  Assert.equal (foo 10) ((fix foo') 10)
+  Assert.equal (foo (-10)) ((fix foo') (-10))
+  let a :: Int -> Int
+      a i | i == 0 = 1
+      a i | i > 0 = b i
+      a i = a (i+3)
+      b :: Int -> Int
+      b i | i == 0 = 0
+      b i | i < 0 = a i
+      b i = b (i-2)
+      a' :: ((Int -> Int) -> Int -> Int) -> (Int -> Int) -> Int -> Int
+      a' _ _ i | i == 1 = 1
+      a' _ f i | i > 0 = f i
+      a' s f i = s f (i+3)
+      b' :: (Int -> Int) -> Int -> Int
+      b' _ i | i == 0 = 0
+      b' s i | i < 0 = (fix a') s i
+      b' s i = s (i-2)
+      b'' :: Int -> Int
+      b'' = fix b'
+      a'' :: Int -> Int
+      a'' = (fix a') b''
+  Assert.equal (a 10) (a'' 10)
+  Assert.equal (a (-10)) (a'' (-10))
+  Assert.equal (b 10) (b'' 10)
+  Assert.equal (b (-10)) (b'' (-10))
+
+
+
+
+
+
+
+
 termTests :: Effect Unit
 termTests = runTest do
   suite "Language.Void" do
+    testFix
 
 --    testExpectErr "x" (NotInScope $ TermVar "x")
 --

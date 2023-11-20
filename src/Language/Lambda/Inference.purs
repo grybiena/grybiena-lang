@@ -2,46 +2,15 @@ module Language.Lambda.Inference where
 
 import Prelude
 
-import Control.Comonad.Cofree (Cofree, deferCofree, head, tail, (:<))
-import Control.Monad.Except (ExceptT)
-import Control.Monad.State (State)
-import Data.Either (Either)
-import Data.Foldable (class Foldable)
-import Data.Tuple (Tuple(..), fst)
-import Data.Tuple.Nested (type (/\), (/\))
+import Control.Comonad.Cofree (Cofree, head, tail, (:<))
+import Data.Tuple (Tuple(..))
+import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (LambdaF(..), app, cat, var)
-import Language.Lambda.Unification (class Context, class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Rewrite, class Shadow, class UnificationError, class Unify, TypingContext, assume, fresh, require, rewrite, runUnification, shadow, unify)
+import Language.Lambda.Unification (class Context, class Fresh, class Rewrite, class Shadow, class Unify, assume, fresh, require, rewrite, shadow, unify)
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Fold (cata)
-
-
-runInference :: forall exp var cat err t.
-        Recursive exp (LambdaF var cat)
-     => Functor cat
-     => Fresh (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
-     => Context var (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
-     => Rewrite (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
-     => Unify (t (LambdaF var cat)) (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
-     => Arrow (t (LambdaF var cat))
-     => Inference var cat (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat)))
-     => Enumerable var
-     => Ord var
-     => IsType (t (LambdaF var cat))
-     => Foldable cat
-     => NotInScopeError var err
-     => InfiniteTypeError var (t (LambdaF var cat)) err 
-     => UnificationError (t (LambdaF var cat)) err
-     => Fresh var (ExceptT err (State (TypingContext var t var cat))) 
-     => Unify (cat (t (LambdaF var cat))) (cat (t (LambdaF var cat))) (ExceptT err (State (TypingContext var t var cat))) 
-     => Inference var cat (t (LambdaF var cat)) (ExceptT err (State (TypingContext var t var cat))) 
-     => Corecursive (t (LambdaF var cat)) (LambdaF var cat)
-     => Recursive (t (LambdaF var cat)) (LambdaF var cat)
-     => Shadow var
-     => exp -> Either err (t (LambdaF var cat)) 
-runInference v = head <$> (fst $ runUnification (infer v))
-
 
 infer :: forall exp var cat m typ .
         Monad m
@@ -176,54 +145,4 @@ instance
   arrow a b = app (app (cat arrowObject) a) b
  
 
- 
--- Elaboration of ininite inference 
----- 
--- type Elaboration f var cat
--- represents the infinite elaboration of the inference homomorphism
--- where `level` extracts the term at the current level
--- and `ascend` lifts the elaboration to the next level
-
--- i.e term ~ level <$> infer term 
---     type ~ level <<< ascend <$> infer term
---     kind ~ level <<< ascend <<< ascend <$> infer term
-
--- and so on...
-
--- a well typed term should converge on the infinite sequence of Stars
-
--- the question is can we lazily create a value of type Elaboration f var cat...
-
-type Elaboration :: forall k. ((Type -> Type) -> k) -> Type -> (Type -> Type) -> k
-type Elaboration f var cat = f (Cofree (LambdaF var cat))
-
-level :: forall f var cat.
-        Functor cat
-     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-     => Recursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
-     => Corecursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
-     => Elaboration f var cat
-     -> f (LambdaF var cat) 
-level c = embed ((level <<< embed) <$> (tail (project c)))
- 
-ascend :: forall f var cat.
-        Functor cat
-     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-     => Recursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
-     => Corecursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
-     => Elaboration f var cat 
-     -> Elaboration f var cat
-ascend = head <<< project
-
-
-
---deferCofree :: forall f a. (Unit -> Tuple a (f (Cofree f a))) -> Cofree f a
-
-elab :: forall f var cat .
-        Corecursive (f (Cofree (LambdaF var cat))) (Cofree (LambdaF var cat))
-     => (Unit -> Elaboration f var cat /\ LambdaF var cat (Cofree (LambdaF var cat) (Elaboration f var cat)))
-     -> Elaboration f var cat
-elab i = embed (deferCofree i)
 

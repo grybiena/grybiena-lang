@@ -11,6 +11,8 @@ import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
+import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
@@ -23,7 +25,7 @@ import Language.Lambda.Reduction (class Basis, class Composition)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Shadow, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, fresh, fromInt, substitute, unificationError, unify)
 import Language.Value.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
-import Prettier.Printer (text, (<+>))
+import Prettier.Printer (stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
 import Prim (Boolean, Int, Number, Record, String)
 import Unsafe.Coerce (unsafeCoerce)
@@ -34,6 +36,7 @@ type Term = Lambda Var TT
 data TT a =
     Star Int
   | Arrow
+  | LetRec (Map Var a) a
   | TypeAnnotation a Term
   | Native (Native Term)
 
@@ -51,13 +54,14 @@ instance IsStar Mu Var TT where
 instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
-
+  map f (LetRec bs a) = LetRec (f <$> bs) (f a)
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Native n) = Native n
 
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
   traverse _ (Star i) = pure (Star i)
+  traverse f (LetRec bs a) = LetRec <$> (traverse f bs) <*> f a
   traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> (f a)
   traverse _ (Native n) = pure (Native n)
   sequence = traverse identity
@@ -143,6 +147,13 @@ instance PrettyLambda Var TT where
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
+  prettyCat (LetRec bs a) =
+    (text "let" <+> prettyBinds)
+                </> (text "in" <+> pretty a)
+    where
+      -- TODO pull out function args instead of pretty printing lambdas
+      prettyBinds = stack (prettyBind <$> Map.toUnfoldable bs)
+      prettyBind (v /\ b) = pretty v <+> text "=" <+> pretty b      
   prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
   prettyCat (Native (Purescript { nativePretty })) = text nativePretty
 
@@ -212,10 +223,11 @@ instance
   , MonadState (TypingContext Var Mu Var TT) m
   ) => Unify (TT Term) (TT Term) m where
   unify Arrow Arrow = pure unit
-  -- TODO concerned that our hierarchy of type universes may permit paradox
-  -- should the type of the arrow be the max of the types of the domain/codomain i.e. (* -> * :: **)
-  -- currently it is always * which is simple but probably wrong for some definition of wrong 
-  -- TODO read more about Girard's paradox and implementations of cumulativity constraints
+  -- TODO cumulativity ~ universe hierarchy
+  -- * -> * must be in a higher universe than *
+  -- ?? arrow has a dependent type (Star n -> Star m -> Star (max(n,m)+1)
+  -- !! constraints must prevent Type in Type
+  -- alternatively - who cares? maybe it's fine
   unify (Star _) (Star _) = pure unit
   unify (TypeAnnotation a ak) (TypeAnnotation b bk) = unify ak bk  *> unify a b
   unify (TypeAnnotation a _) b = unify a (cat b)
@@ -236,6 +248,9 @@ instance
   ) => Inference Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
+  inference (LetRec bs a) = do
+     -- TODO desugar LetRec to a linear sequence of bindings
+     a
   inference (TypeAnnotation v t) = do
     (t' :: Cofree (LambdaF Var TT) Term) <- v
     unify (t :: Term) (head t' :: Term)
