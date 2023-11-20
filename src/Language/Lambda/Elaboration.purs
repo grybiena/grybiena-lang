@@ -26,6 +26,7 @@ import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Fold (cata)
+import Unsafe.Coerce (unsafeCoerce)
 
 class Inference :: forall k. ((Type -> Type) -> k) -> Type -> (Type -> Type) -> (k -> Type) -> Constraint
 class Inference f var cat m where
@@ -148,7 +149,14 @@ appRule f a = do
 
 ----
 
- 
+--instance Fresh var m => Fresh (Elaboration f var cat) m where
+--  fresh = do
+--     v <- fresh
+--     t <- fresh --Impossible? a fresh elaboration requires an infinite sequence of fresh types
+--     pure (elab (const (t /\ Var v)))
+
+-- varRule v = require v >>= \t -> pure (elab $ const (t /\ Var v))
+
 -- Elaboration of ininite inference 
 ---- 
 -- type Elaboration f var cat
@@ -171,6 +179,7 @@ type Elaboration f var cat = f (Cofree (LambdaF var cat))
 
 type DeferredElab f var cat = 
   Unit -> Elaboration f var cat /\ LambdaF var cat (Cofree (LambdaF var cat) (Elaboration f var cat))
+
 
 level :: forall f var cat.
         Functor cat

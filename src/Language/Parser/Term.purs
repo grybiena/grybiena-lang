@@ -9,8 +9,10 @@ import Control.Monad.Cont (lift)
 import Data.Array (fromFoldable, replicate)
 import Data.Homogeneous (class ToHomogeneousRow)
 import Data.List ((..))
+import Data.Map as Map
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (fst, uncurry)
+import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Lambda.Calculus (absMany, app, cat, var)
 import Language.Lambda.Unification (class Fresh, fresh)
@@ -65,14 +67,28 @@ parser mod = {
     parens :: forall a. ParserT String m a -> ParserT String m a
     parens = tokenParser.parens
     
+    parseLetRec :: Fresh Int m => Fresh Var m =>  ParserT String m Term
+    parseLetRec = do
+      reserved "let"
+      ds <- tokenParser.braces (tokenParser.semiSep1 parseValueDecl)
+      reserved "in"
+      body <- parseValue
+      pure $ cat $ LetRec (Map.fromFoldable ds) body
+      where
+        parseValueDecl = do
+           v <- ((Ident <<< TermVar) <$> identifier) 
+           reservedOp "="
+           b <- parseValue
+           pure (v /\ b)
 
-    parseValue ::  Fresh Int m => Fresh Var m =>  ParserT String m Term
+
+    parseValue :: Fresh Int m => Fresh Var m =>  ParserT String m Term
     parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
     
-    parseValueAtom ::  Fresh Int m => Fresh Var m =>  ParserT String m Term
-    parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> (parens parseValue)
+    parseValueAtom :: ParserT String m Term
+    parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLetRec <|> (parens parseValue)
     
-    parseTypeLit :: Monad m => ParserT String m Term
+    parseTypeLit :: ParserT String m Term
     parseTypeLit = char '@' *> parseTypeAtom 
     
     parseNumeric ::  ParserT String m Term
@@ -81,7 +97,7 @@ parser mod = {
     parseInt ::  ParserT String m Term
     parseInt = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> integer
      
-    parseNatives ::  Fresh Int m =>  ParserT String m Term
+    parseNatives :: ParserT String m Term
     parseNatives = choice $ map (uncurry parseNative) kernel
      
     parseNative ::  String -> m (Native Term) -> ParserT String m Term
@@ -90,18 +106,18 @@ parser mod = {
     parseNumber ::  ParserT String m Term
     parseNumber = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> number 
     
-    parseTypeAnnotation :: Fresh Int m => Monad m => Term -> ParserT String m Term
+    parseTypeAnnotation :: Term -> ParserT String m Term
     parseTypeAnnotation v = do
       reservedOp "::"
       t <- parseType
       pure $ cat $ TypeAnnotation v t
      
-    parseAbs ::  Fresh Var m => Fresh Int m =>  ParserT String m Term
+    parseAbs :: ParserT String m Term
     parseAbs = absMany <$> parsePats <*> parseValue
       where
         parsePats = reservedOp "\\" *> many1Till (Ident <<< TermVar <$> identifier) (reservedOp "->")
     
-    parseApp ::  Fresh Var m => Fresh Int m =>  Term -> ParserT String m Term
+    parseApp :: Term -> ParserT String m Term
     parseApp v = app v <$> parseValueAtom
     
     parseType :: Monad m => ParserT String m Term
