@@ -33,7 +33,7 @@ languageDef extraReservedNames = LanguageDef
   op' :: ParserT String m Char
   op' = oneOf [ ':', '!', '#', '$', '%', '&', '*', '+', '.', '/', '<', '=', '>', '?', '@', '\\', '^', '|', '-', '~' ]
   reservedOpNames =  [ "=", "::", ",", ".", "\\", "->"]
-  reservedNames = [ "forall", "type", "data", "String", "Int", "Number", "Effect" ] <> extraReservedNames
+  reservedNames = [ "forall", "let", "in", "type", "data", "String", "Int", "Number", "Effect" ] <> extraReservedNames
 
  
 tokenParser :: forall m. GenTokenParser String m 

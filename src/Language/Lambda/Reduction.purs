@@ -15,29 +15,35 @@ class Composition f var cat m where
   composition :: f (LambdaF var cat)
           -> f (LambdaF var cat)
           -> m (f (LambdaF var cat))
+
+class Reduction f var cat m where
+  reduction :: cat (f (LambdaF var cat))
+            -> m (f (LambdaF var cat))
  
 reduce :: forall f var cat m.
              Recursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Composition f var cat m
+         => Reduction f var cat m
          => Eq (f (LambdaF var cat))
          => Monad m
          => Traversable cat
          => f (LambdaF var cat) -> m (f (LambdaF var cat))
-reduce = cataM reduction
+reduce = cataM reduceLambda
 
-reduction :: forall f var cat m.
+reduceLambda :: forall f var cat m.
              Recursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Composition f var cat m
+         => Reduction f var cat m
          => Applicative m
          => AlgebraM m (LambdaF var cat) (f (LambdaF var cat))
-reduction =
+reduceLambda =
   case _ of
     Var v -> pure $ var v
     Abs x e -> pure $ abs x e
     App a b -> composition a b
-    Cat c -> pure $ cat c
+    Cat c -> reduction c
 
 -- TODO extend to reduce to C and B combinators 
 elimAbs :: forall f var cat m.
@@ -60,7 +66,7 @@ elimAbs lam =
       case project e of
         Var v | v == x -> cat <$> basisI
         Abs _ f | x `freeIn` f -> (abs x <$> elimAbs e) >>= elimAbs  
-        -- eta reduction
+        -- eta reduce
         App a b | b == var x -> elimAbs a
         App a b | x `freeIn` e -> do
                 s <- cat <$> basisS

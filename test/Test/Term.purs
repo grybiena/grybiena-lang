@@ -107,6 +107,10 @@ termTests = runTest do
 
     testInferType "\\x y -> y" "(t1 -> (t2 -> t2))" 
     testInferSkiType "\\x y -> y" "(t2 -> (t3 -> t3))"
+
+    testInferType "\\x -> let { i = 1 } in x i" "((Int -> t3) -> t3)"
+    testInferType "\\x -> let { i = \\a -> intPlus a 1 } in i x" "(Int -> Int)"
+
  
 
     -- eta reduction 
@@ -211,6 +215,9 @@ termTests = runTest do
                         n <- liftEffect (out 3.0)
                         Assert.equal 4.0 n
                     )
+
+    testCompileEval "(\\x -> let { i = \\a -> intPlus a 1 } in i x) 1" (Assert.equal 2)
+
 
 
 testInferType :: String -> String -> TestSuite
@@ -317,7 +324,7 @@ compile s ty = do
     case t of
       Left err -> pure $ Left $ ParseError err
       Right val -> do
-        out <- elimAbs val >>= reduce
+        out <- reduce val >>= elimAbs >>= reduce
         case project out of
           Cat (Native (Purescript { nativeType, nativeTerm })) -> do
             let tyt = reify ty

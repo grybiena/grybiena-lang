@@ -8,21 +8,23 @@ import Control.Monad.State (class MonadState)
 import Data.Array (replicate)
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
-import Data.Foldable (class Foldable)
+import Data.Foldable (class Foldable, foldr)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
+import Data.List (List)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
-import Data.Traversable (class Traversable, traverse)
+import Data.Traversable (class Traversable, traverse, traverse_)
+import Data.Tuple (uncurry)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), app, cat, prettyVar, replace, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, (:->:))
-import Language.Lambda.Reduction (class Basis, class Composition)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Shadow, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, fresh, fromInt, substitute, unificationError, unify)
+import Language.Lambda.Reduction (class Basis, class Composition, class Reduction)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Shadow, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, assume, fresh, fromInt, substitute, unificationError, unify)
 import Language.Value.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (stack, text, (<+>), (</>))
@@ -249,7 +251,11 @@ instance
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
   inference (LetRec bs a) = do
-     -- TODO desugar LetRec to a linear sequence of bindings
+     let bx :: List _
+         bx = Map.toUnfoldable bs
+     traverse_ (\(v /\ t) -> do
+        t' <- t
+        assume v (head t')) bx
      a
   inference (TypeAnnotation v t) = do
     (t' :: Cofree (LambdaF Var TT) Term) <- v
@@ -310,4 +316,19 @@ instance
                                        , nativeTerm: na.nativeTerm nb.nativeTerm
                                        }))
       _ -> pure $ app a b 
+
+instance
+  ( Monad m
+  , Unify Term Term m
+  , MonadState (TypingContext Var Mu Var TT) m
+  , MonadThrow (UnificationError n) m
+  ) => Reduction Mu Var TT m where
+  reduction =
+    case _ of
+      LetRec bi bo -> do
+         -- TODO desugar recursive block to a linear sequence of lets using fix
+         let inline :: Var -> Term -> Term -> Term
+             inline v r = replace (\w -> if w == v then Just r else Nothing)
+         pure $ foldr (uncurry inline) bo (Map.toUnfoldable bi :: List _)
+      c -> pure $ cat c
 
