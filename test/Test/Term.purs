@@ -24,13 +24,14 @@ import Language.Lambda.Calculus (LambdaF(..))
 import Language.Lambda.Inference (infer)
 import Language.Lambda.Reduction (elimAbs, reduce)
 import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
-import Language.Native.Module (nativeModuleUnion)
+import Language.Native (Native(..))
+import Language.Native.Meta (metaModule)
+import Language.Native.Module (NativeModule, nativeModuleUnion)
+import Language.Native.Reify (class Reify, nativeModule, reify)
 import Language.Parser.Term (parser)
 import Language.Term (TT(..), Term, UnificationError, Var)
-import Language.Native.Reify (class Reify, nativeModule, reify)
-import Language.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
-import Parsing (ParseError, runParserT)
+import Parsing (ParseError, ParserT, runParserT)
 import Parsing.String (eof)
 import Pretty.Printer (prettyPrint)
 import Test.Unit (TestSuite, suite, test)
@@ -168,8 +169,8 @@ termTests = runTest do
     testInferKind "Number" "*"
 
     -- Effect
-    testInferType "pureEffect" "(forall t1 . (t1 -> (Effect t1)))"
-    testInferSkiType "pureEffect" "(forall t1 . (t1 -> (Effect t1)))"
+    testInferType "pureEffect" "(forall a:1 . (a -> (Effect a)))"
+    testInferSkiType "pureEffect" "(forall a:1 . (a -> (Effect a)))"
 
     testInferType "pureEffect @Int" "(Int -> (Effect Int))"
     testInferSkiType "pureEffect @Int" "(Int -> (Effect Int))"
@@ -177,7 +178,7 @@ termTests = runTest do
     -- skolemizing removes the forall, encoding its scope into the type variables 
     testInferType "\\x -> pureEffect x" "(t2 -> (Effect t2))"
     -- This works by eta reduction
-    testInferSkiType "\\x -> pureEffect x" "(forall t1 . (t1 -> (Effect t1)))"
+    testInferSkiType "\\x -> pureEffect x" "(forall a:1 . (a -> (Effect a)))"
 
     -- application to a term with a concrete type infers the universally quantified type variable
     testInferType "(\\x -> pureEffect x) 1" "(Effect Int)"
@@ -198,7 +199,8 @@ termTests = runTest do
     testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
     testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
 
-    testInferType "pureEffect bindEffect" "(Effect (forall t2 . (forall t3 . ((Effect t2) -> ((t2 -> (Effect t3)) -> (Effect t3))))))" 
+    testInferType "pureEffect bindEffect" "(Effect (forall t4 . (forall b:3 . ((Effect t4) -> ((t4 -> (Effect b)) -> (Effect b))))))"
+    
 
 
     -- Compile
@@ -224,10 +226,9 @@ testInferType :: String -> String -> TestSuite
 testInferType v t = test ("(" <> v <> ") :: " <> t) $ do
   e <- fst <$> runUnificationT do
     vt <- termParser v
-    tt <- typeParser t
-    case Tuple <$> vt <*> tt of
+    case vt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term) /\ (_ :: Term)) -> do
+      Right (val :: Term) -> do
         (i :: Term) <- head <$> infer val
         liftAff $ Assert.equal t (prettyPrint i)
   case e of
@@ -239,10 +240,9 @@ testInferSkiType :: String -> String -> TestSuite
 testInferSkiType v t = test ("(" <> v <> ") :: " <> t) $ do
   e <- fst <$> runUnificationT do
     vt <- termParser v
-    tt <- typeParser t
-    case Tuple <$> vt <*> tt of
+    case vt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
-      Right ((val :: Term) /\ (_ :: Term)) -> do
+      Right (val :: Term) -> do
         ski <- elimAbs val
 --        liftEffect $ log $ prettyPrint ski
         (i :: Term) <- head <$> infer ski
@@ -336,17 +336,19 @@ compile s ty = do
 
 
 
-typeParser :: forall m.  Fresh Int m => MonadRec m => String -> m (Either ParseError Term) 
+typeParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term) 
 typeParser s = runParserT s do
-  let someKernel = nativeModuleUnion (nativeModule pureModule) effectNatives
+  let someKernel = nativeModuleUnion (nativeModule pureModule) (metaModule effectNatives)
   v <- (parser someKernel).parseType
   eof
   pure v
 
 
-termParser :: forall m.  Fresh Int m => Fresh Var m => MonadRec m => String -> m (Either ParseError Term)
+termParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term)
 termParser s = runParserT s do
-  let someKernel = nativeModuleUnion (nativeModule pureModule) effectNatives
+  let mm :: NativeModule _ (ParserT String m (Native Term))
+      mm = (metaModule effectNatives)
+      someKernel = nativeModuleUnion (nativeModule pureModule) mm 
   v <- (parser someKernel).parseValue
   eof
   pure v

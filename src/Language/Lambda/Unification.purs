@@ -14,7 +14,7 @@ import Data.Maybe (Maybe(..))
 import Data.Set as Set
 import Data.Traversable (traverse)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (LambdaF(..), occursIn, replace, universe, var)
+import Language.Lambda.Calculus (LambdaF(..), freeIn, replace, universe, var)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
@@ -181,21 +181,22 @@ instance
   , Unify var' (f (LambdaF var' cat')) m
   , UnificationError (f (LambdaF var' cat')) err
   , MonadThrow err m
+  , Shadow var' -- TODO is it safe to only consider shadows?
   ) => Substitute var' cat' f m where
   substitute v t' = do
      t <- rewrite t'
-     when (v `occursIn` t) $ throwError $ infiniteTypeError v t 
+     when (v `freeIn` t) $ throwError $ infiniteTypeError v t 
      u <- rewrite (var v :: f (LambdaF var' cat'))
      case project u of
         Var v' | v' == v -> pure unit 
         _ -> void $ unify u t
      let subNew = replace (\x -> if x == v then Just t else Nothing)
      modify_ (\st -> st {
-                currentSubstitution = Map.insert v t (subNew <$> st.currentSubstitution)
+                currentSubstitution = Map.insert (shadow v) t (subNew <$> st.currentSubstitution)
               })
   substitution = do
     st <- get
-    pure $ flip Map.lookup st.currentSubstitution
+    pure $ flip Map.lookup st.currentSubstitution <<< shadow
 
 -- Variables can have added context (e.g. scope, skolem constant) which shadow removes
 class Shadow var where

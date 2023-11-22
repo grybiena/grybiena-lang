@@ -35,15 +35,15 @@ type Parser m =
 
 parser :: forall names row m.
           Fresh Int m
-       => ToHomogeneousRow names (m (Native Term)) row
-       => NativeModule names (m (Native Term))
+       => ToHomogeneousRow names (ParserT String m (Native Term)) row
+       => NativeModule names (ParserT String m (Native Term))
        -> Parser m
 parser mod = {
     parseValue: parseValue
   , parseType: parseType
   }
   where
-    kernel :: Listing (m (Native Term))
+    kernel :: Listing (ParserT String m (Native Term))
     kernel = moduleListing mod
 
     tokenParser :: GenTokenParser String m 
@@ -67,7 +67,7 @@ parser mod = {
     parens :: forall a. ParserT String m a -> ParserT String m a
     parens = tokenParser.parens
     
-    parseLetRec :: Fresh Int m => Fresh Var m =>  ParserT String m Term
+    parseLetRec :: ParserT String m Term
     parseLetRec = do
       reserved "let"
       ds <- tokenParser.braces (tokenParser.semiSep1 parseValueDecl)
@@ -82,7 +82,7 @@ parser mod = {
            pure (v /\ b)
 
 
-    parseValue :: Fresh Int m => Fresh Var m =>  ParserT String m Term
+    parseValue :: Monad m => ParserT String m Term
     parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
     
     parseValueAtom :: ParserT String m Term
@@ -100,8 +100,8 @@ parser mod = {
     parseNatives :: ParserT String m Term
     parseNatives = choice $ map (uncurry parseNative) kernel
      
-    parseNative ::  String -> m (Native Term) -> ParserT String m Term
-    parseNative name native = reserved name *> ((cat <<< Native) <$> lift native)
+    parseNative ::  String -> ParserT String m (Native Term) -> ParserT String m Term
+    parseNative name native = reserved name *> ((cat <<< Native) <$> native)
      
     parseNumber ::  ParserT String m Term
     parseNumber = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> number 

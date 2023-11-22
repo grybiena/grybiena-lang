@@ -104,7 +104,7 @@ occursIn :: forall var cat f .
          => Foldable cat
          => Recursive (f (LambdaF var cat)) (LambdaF var cat)
          => var -> f (LambdaF var cat) -> Boolean
-occursIn v expr = v `Set.member` universe expr
+occursIn v expr = v `Set.member` free expr
 
 universe :: forall var cat f .
             Ord var

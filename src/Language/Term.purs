@@ -214,8 +214,16 @@ instance
   unify v@(Skolemized _ _ i) t =
     case project t of
       Var (Skolemized _ _ j) | i == j -> pure unit
-      _ -> throwError $ unificationError (var v) t
-  unify v t = throwError $ unificationError (var v) t
+      Var (Skolemized _ _ _) -> throwError $ unificationError (var v) t
+      -- TODO is substitution always safe?                             
+      _ -> substitute v t
+--      _ -> throwError $ unificationError (var v) t
+  unify v@(Scoped _ _) t =
+    case project t of
+      Var x@(Scoped _ _) | v == x -> pure unit
+      -- TODO is substitution always safe?
+      _ -> substitute v t
+
 
 
 instance
