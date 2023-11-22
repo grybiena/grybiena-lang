@@ -1,4 +1,4 @@
-module Language.Value.Native where
+module Language.Native where
 
 import Prelude
 

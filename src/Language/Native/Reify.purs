@@ -1,4 +1,4 @@
-module Language.Term.Reify where
+module Language.Native.Reify where
 
 import Control.Alternative (class Applicative, pure)
 import Data.Homogeneous (class HomogeneousRowLabels)
@@ -10,7 +10,7 @@ import Language.Lambda.Calculus (app, cat)
 import Language.Module (Module)
 import Language.Term (TT(..), Term)
 import Language.Type (Type, primitiveTypeConstructors)
-import Language.Value.Native (Native(..))
+import Language.Native (Native(..))
 import Prim (Constraint, Int, Number, Record, String)
 import Prim.RowList (class RowToList)
 import Type.Proxy (Proxy(..))

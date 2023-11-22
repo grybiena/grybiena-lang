@@ -25,7 +25,7 @@ import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, La
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, (:->:))
 import Language.Lambda.Reduction (class Basis, class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Shadow, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, assume, fresh, fromInt, substitute, unificationError, unify)
-import Language.Value.Native (Native(..))
+import Language.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
