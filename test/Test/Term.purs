@@ -169,16 +169,16 @@ termTests = runTest do
     testInferKind "Number" "*"
 
     -- Effect
-    testInferType "pureEffect" "(forall a:1 . (a -> (Effect a)))"
-    testInferSkiType "pureEffect" "(forall a:1 . (a -> (Effect a)))"
+    testInferType "pureEffect" "(forall t2 . (t2 -> (Effect t2)))"
+    testInferSkiType "pureEffect" "(forall t2 . (t2 -> (Effect t2)))"
 
     testInferType "pureEffect @Int" "(Int -> (Effect Int))"
     testInferSkiType "pureEffect @Int" "(Int -> (Effect Int))"
 
     -- skolemizing removes the forall, encoding its scope into the type variables 
-    testInferType "\\x -> pureEffect x" "(t2 -> (Effect t2))"
+    testInferType "\\x -> pureEffect x" "(t3 -> (Effect t3))"
     -- This works by eta reduction
-    testInferSkiType "\\x -> pureEffect x" "(forall a:1 . (a -> (Effect a)))"
+    testInferSkiType "\\x -> pureEffect x" "(forall t2 . (t2 -> (Effect t2)))"
 
     -- application to a term with a concrete type infers the universally quantified type variable
     testInferType "(\\x -> pureEffect x) 1" "(Effect Int)"
@@ -199,7 +199,7 @@ termTests = runTest do
     testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
     testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
 
-    testInferType "pureEffect bindEffect" "(Effect (forall t4 . (forall b:3 . ((Effect t4) -> ((t4 -> (Effect b)) -> (Effect b))))))"
+    testInferType "pureEffect bindEffect" "(Effect (forall t5 . (forall t6 . ((Effect t5) -> ((t5 -> (Effect t6)) -> (Effect t6))))))"
     
 
 

@@ -10,7 +10,7 @@ import Data.Homogeneous (class HomogeneousRowLabels)
 import Data.Homogeneous.Record (homogeneous)
 import Data.Symbol (class IsSymbol, reflectSymbol)
 import Heterogeneous.Mapping (class MapRecordWithIndex, class MappingWithIndex, hmapWithIndex)
-import Language.Lambda.Unification (class Fresh)
+import Language.Lambda.Unification (class Fresh, renameFresh)
 import Language.Native (Native(..))
 import Language.Native.Module (NativeModule)
 import Language.Native.Reify (nativeModule)
@@ -56,7 +56,8 @@ metaNative nativePretty (MetaNative { metaType, nativeTerm }) = do
      v <- (parser (nativeModule {})).parseType
      eof
      pure v
-  flip (either throwError) t $ \nativeType -> do
+  flip (either throwError) t $ \nt -> do
+     nativeType <- lift $ renameFresh nt
      pure $ Purescript { nativeType
                        , nativePretty
                        , nativeTerm: unsafeCoerce nativeTerm

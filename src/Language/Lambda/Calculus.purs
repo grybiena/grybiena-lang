@@ -2,19 +2,20 @@ module Language.Lambda.Calculus where
 
 import Prelude
 
+import Control.Monad.State (State, evalState, get, put)
 import Data.Eq (class Eq1, eq1)
 import Data.Foldable (class Foldable, foldMap, foldl, foldr)
 import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
-import Data.Maybe (Maybe(..), isJust, maybe)
+import Data.Maybe (Maybe(..), maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
-import Matryoshka.Algebra (Algebra)
+import Matryoshka.Algebra (Algebra, AlgebraM)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
-import Matryoshka.Fold (cata)
+import Matryoshka.Fold (cata, cataM)
 import Prettier.Printer (DOC, text)
 
 -- | Un-Fixed LambdaF 
@@ -104,7 +105,7 @@ occursIn :: forall var cat f .
          => Foldable cat
          => Recursive (f (LambdaF var cat)) (LambdaF var cat)
          => var -> f (LambdaF var cat) -> Boolean
-occursIn v expr = v `Set.member` free expr
+occursIn v expr = v `Set.member` universe expr
 
 universe :: forall var cat f .
             Ord var
@@ -152,6 +153,42 @@ onVar replacement =
     Var v -> maybe (var v) identity (replacement v)
     App a b -> app a b
     Cat c -> cat c
+
+-- Variables can have added context (e.g. scope, skolem constant) which shadow removes
+class Shadow var where
+  shadow :: var -> var
+
+
+
+replaceFree :: forall var cat f .
+           Eq var
+        => Foldable cat
+        => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+        => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+        => Traversable cat
+        => Shadow var
+        => (var -> Maybe (f (LambdaF var cat)))
+        -> f (LambdaF var cat)
+        -> f (LambdaF var cat)
+replaceFree r exp = evalState (cataM onFree exp) r
+
+
+onFree :: forall var cat f .
+        Eq var
+     => Shadow var
+     => Foldable cat
+     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
+     => AlgebraM (State (var -> Maybe (f (LambdaF var cat)))) (LambdaF var cat) (f (LambdaF var cat))
+onFree exp = do
+  replacement <- get
+  case exp of
+    Abs v a -> do
+       put (\x -> if shadow x == v then Nothing else replacement x)
+       pure $ abs v a
+    Var v -> pure $ maybe (var v) identity (replacement v)
+    App a b -> pure $ app a b
+    Cat c -> pure $ cat c
 
 
 

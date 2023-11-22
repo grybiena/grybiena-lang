@@ -21,10 +21,10 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested ((/\))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, Lambda, LambdaF(..), app, cat, prettyVar, replace, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replace, replaceFree, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, (:->:))
 import Language.Lambda.Reduction (class Basis, class Composition, class Reduction)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Shadow, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, assume, fresh, fromInt, substitute, unificationError, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, assume, fresh, fromInt, substitute, unificationError, unify)
 import Language.Native (Native(..))
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (stack, text, (<+>), (</>))
@@ -69,7 +69,7 @@ instance Traversable TT where
   sequence = traverse identity
 
 instance Skolemize Mu Var TT where
-  skolemize (Scoped i s) k = replace (\x -> if x == Ident i then Just (var (Skolemized i s k)) else Nothing) 
+  skolemize (Scoped i s) k = replaceFree (\x -> if x == Ident i then Just (var (Skolemized i s k)) else Nothing) 
   -- TODO error if the Var is not Scoped
   skolemize _ _ = identity
 
@@ -336,7 +336,7 @@ instance
       LetRec bi bo -> do
          -- TODO desugar recursive block to a linear sequence of lets using fix
          let inline :: Var -> Term -> Term -> Term
-             inline v r = replace (\w -> if w == v then Just r else Nothing)
+             inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
          pure $ foldr (uncurry inline) bo (Map.toUnfoldable bi :: List _)
       c -> pure $ cat c
 

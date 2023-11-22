@@ -12,9 +12,9 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Set as Set
-import Data.Traversable (traverse)
+import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (LambdaF(..), freeIn, replace, universe, var)
+import Language.Lambda.Calculus (class Shadow, LambdaF(..), freeIn, replace, replaceFree, shadow, universe, var)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
@@ -33,13 +33,14 @@ class Rewrite typ m where
 
 instance
   ( Substitute var cat f m
-  , Foldable cat
+  , Traversable cat
+  , Shadow var
   , Functor m
   , Recursive (f (LambdaF var cat)) (LambdaF var cat)
   , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
   , Eq var
   ) => Rewrite (f (LambdaF var cat)) m where
-  rewrite expr = flip replace expr <$> substitution 
+  rewrite expr = flip replaceFree expr <$> substitution 
 
 class Context var typ m | var -> typ where
   assume :: var -> typ -> m Unit
@@ -170,7 +171,8 @@ instance
 
 instance
   ( Ord var'
-  , Foldable cat'
+  , Shadow var'
+  , Traversable cat'
   , Fresh var' m
   , Skolemize f var' cat'
   , MonadState (TypingContext var f var' cat') m
@@ -185,22 +187,20 @@ instance
   ) => Substitute var' cat' f m where
   substitute v t' = do
      t <- rewrite t'
+     -- TODO is this a strong enough check?
+     -- i.e. is rewriting { a ~> forall a. a -> a } sound or going to result in doom?
      when (v `freeIn` t) $ throwError $ infiniteTypeError v t 
      u <- rewrite (var v :: f (LambdaF var' cat'))
      case project u of
         Var v' | v' == v -> pure unit 
         _ -> void $ unify u t
-     let subNew = replace (\x -> if x == v then Just t else Nothing)
+     let subNew = replaceFree (\x -> if x == v then Just t else Nothing)
      modify_ (\st -> st {
                 currentSubstitution = Map.insert (shadow v) t (subNew <$> st.currentSubstitution)
               })
   substitution = do
     st <- get
     pure $ flip Map.lookup st.currentSubstitution <<< shadow
-
--- Variables can have added context (e.g. scope, skolem constant) which shadow removes
-class Shadow var where
-  shadow :: var -> var
 
 -- | Rename all of the bindings and variables with fresh ones
 -- without incurring any substitutions (the new variables will be unique to the term)
@@ -212,7 +212,6 @@ renameFresh :: forall f var cat m.
     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
     => Fresh var m
-    => Substitute var cat f m
     => f (LambdaF var cat) -> m (f (LambdaF var cat))
 renameFresh t = do
   r <- flip traverse (fromFoldable $ Set.map shadow $ universe t) $ \v -> do
