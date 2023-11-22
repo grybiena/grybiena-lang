@@ -7,7 +7,7 @@ import Effect (Effect)
 import Language.Lambda.Calculus (abs, absMany, app, var)
 import Language.Lambda.Inference ((:->:))
 import Language.Lambda.Unification (class Fresh, fresh)
-import Language.Module (Module)
+import Language.Native.Module (NativeModule)
 import Language.Term (Term, Var)
 import Language.Native.Reify (reify)
 import Language.Native (Native(..))
@@ -56,7 +56,7 @@ type EffectTermListing =
 effectNatives :: forall m.
      Monad m
   => Fresh Var m
-  => Module
+  => NativeModule
       EffectTermListing
       (m (Native Term))
 effectNatives = homogeneous

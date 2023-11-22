@@ -24,7 +24,7 @@ import Language.Lambda.Calculus (LambdaF(..))
 import Language.Lambda.Inference (infer)
 import Language.Lambda.Reduction (elimAbs, reduce)
 import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
-import Language.Module (moduleUnion)
+import Language.Native.Module (nativeModuleUnion)
 import Language.Parser.Term (parser)
 import Language.Term (TT(..), Term, UnificationError, Var)
 import Language.Native.Reify (class Reify, nativeModule, reify)
@@ -338,7 +338,7 @@ compile s ty = do
 
 typeParser :: forall m.  Fresh Int m => MonadRec m => String -> m (Either ParseError Term) 
 typeParser s = runParserT s do
-  let someKernel = moduleUnion (nativeModule pureModule) effectNatives
+  let someKernel = nativeModuleUnion (nativeModule pureModule) effectNatives
   v <- (parser someKernel).parseType
   eof
   pure v
@@ -346,7 +346,7 @@ typeParser s = runParserT s do
 
 termParser :: forall m.  Fresh Int m => Fresh Var m => MonadRec m => String -> m (Either ParseError Term)
 termParser s = runParserT s do
-  let someKernel = moduleUnion (nativeModule pureModule) effectNatives
+  let someKernel = nativeModuleUnion (nativeModule pureModule) effectNatives
   v <- (parser someKernel).parseValue
   eof
   pure v

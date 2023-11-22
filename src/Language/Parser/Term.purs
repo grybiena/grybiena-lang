@@ -16,7 +16,7 @@ import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Lambda.Calculus (absMany, app, cat, var)
 import Language.Lambda.Unification (class Fresh, fresh)
-import Language.Module (Listing, Module, moduleListing)
+import Language.Native.Module (Listing, NativeModule, moduleListing)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
 import Language.Native.Reify (nativeTerm, reify)
@@ -36,7 +36,7 @@ type Parser m =
 parser :: forall names row m.
           Fresh Int m
        => ToHomogeneousRow names (m (Native Term)) row
-       => Module names (m (Native Term))
+       => NativeModule names (m (Native Term))
        -> Parser m
 parser mod = {
     parseValue: parseValue

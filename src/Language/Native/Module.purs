@@ -1,4 +1,4 @@
-module Language.Module where
+module Language.Native.Module where
 
 
 import Data.FoldableWithIndex (foldrWithIndex)
@@ -15,23 +15,23 @@ type Listing term = List (String /\ term)
 
 moduleListing :: forall ra names term .
                  ToHomogeneousRow names term ra
-              => Module names term -> Listing term
+              => NativeModule names term -> Listing term
 moduleListing h = foldrWithIndex (\s n l -> (s /\ n):l) Nil h
 
 listingBinds :: forall names list . RowToList names list => Keys list => Proxy names -> List String
 listingBinds _ = keysImpl (Proxy :: Proxy list)
   
-type Module names term = Homogeneous names term
+type NativeModule names term = Homogeneous names term
 
-moduleUnion :: forall l rl r rr u ru term .
+nativeModuleUnion :: forall l rl r rr u ru term .
                 Union rl rr ru
              => ToHomogeneousRow l term rl
              => ToHomogeneousRow r term rr
              => HomogeneousRowLabels ru term u
-             => Module l term
-             -> Module r term
-             -> Module u term
-moduleUnion l r =
+             => NativeModule l term
+             -> NativeModule r term
+             -> NativeModule u term
+nativeModuleUnion l r =
   let z :: Record ru
       z = union (fromHomogeneous l) (fromHomogeneous r)
   in homogeneous z

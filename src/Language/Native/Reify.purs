@@ -7,7 +7,7 @@ import Data.Symbol (class IsSymbol, reflectSymbol)
 import Effect (Effect)
 import Heterogeneous.Mapping (class MapRecordWithIndex, class MappingWithIndex, hmapWithIndex)
 import Language.Lambda.Calculus (app, cat)
-import Language.Module (Module)
+import Language.Native.Module (NativeModule)
 import Language.Term (TT(..), Term)
 import Language.Type (Type, primitiveTypeConstructors)
 import Language.Native (Native(..))
@@ -22,7 +22,7 @@ nativeModule :: forall m mod names het listing.
   => RowToList mod names 
   => MapRecordWithIndex names NativeTerm mod het 
   => Record mod 
-  -> Module listing (m (Native Term))
+  -> NativeModule listing (m (Native Term))
 nativeModule r = let (x :: Record het) = hmapWithIndex NativeTerm r in homogeneous x 
 
 data NativeTerm = NativeTerm
