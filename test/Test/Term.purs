@@ -110,9 +110,13 @@ termTests = runTest do
     testInferSkiType "\\x y -> y" "(t2 -> (t3 -> t3))"
 
     testInferType "\\x -> let { i = 1 } in x i" "((Int -> t3) -> t3)"
+    testInferType "\\x -> let { i = 1; j = 2 } in x i j" "((Int -> (Int -> t5)) -> t5)"
     testInferType "\\x -> let { i = \\a -> intPlus a 1 } in i x" "(Int -> Int)"
+    testInferType "\\x -> let { i = 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t9)) -> t9)"
+    testInferType "\\x -> let { j = intPlus i 2; i = 1 } in x i j" "((Int -> (Int -> t9)) -> t9)"
 
- 
+    testInferType "\\x -> let { i = intPlus j 1; j = 2 } in x i j" "((Int -> (Int -> t9)) -> t9)"
+
 
     -- eta reduction 
     testInferType "\\x y -> x y" "((t2 -> t4) -> (t2 -> t4))"
@@ -219,6 +223,8 @@ termTests = runTest do
                     )
 
     testCompileEval "(\\x -> let { i = \\a -> intPlus a 1 } in i x) 1" (Assert.equal 2)
+
+    testCompileEval "(\\x -> let { j = intPlus i 2; i = 1 } in x i j) intPlus" (Assert.equal 4)
 
 
 

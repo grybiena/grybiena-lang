@@ -187,8 +187,6 @@ instance
   ) => Substitute var' cat' f m where
   substitute v t' = do
      t <- rewrite t'
-     -- TODO is this a strong enough check?
-     -- i.e. is rewriting { a ~> forall a. a -> a } sound or going to result in doom?
      when (v `occursIn` t) $ throwError $ infiniteTypeError v t 
      u <- rewrite (var v :: f (LambdaF var' cat'))
      case project u of
