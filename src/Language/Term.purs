@@ -12,13 +12,15 @@ import Data.Foldable (class Foldable, foldr)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
 import Data.List (List)
+import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
-import Data.Tuple.Nested (type (/\), (/\))
+import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, (:->:))
 import Language.Lambda.Reduction (class Basis, class Composition, class Reduction)
@@ -36,7 +38,7 @@ type Term = Lambda Var TT
 data TT a =
     Star Int
   | Arrow
-  | Let (List (Var /\ a)) a
+  | LetRec (Map Var a) a
   | TypeAnnotation a Term
   | Native (Native Term)
 
@@ -54,14 +56,14 @@ instance IsStar Mu Var TT where
 instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
-  map f (Let bs a) = Let (map f <$> bs) (f a)
+  map f (LetRec bs a) = LetRec (f <$> bs) (f a)
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (Native n) = Native n
 
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
   traverse _ (Star i) = pure (Star i)
-  traverse f (Let bs a) = Let <$> (traverse (traverse f) bs) <*> f a
+  traverse f (LetRec bs a) = LetRec <$> (traverse f bs) <*> f a
   traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> (f a)
   traverse _ (Native n) = pure (Native n)
   sequence = traverse identity
@@ -147,12 +149,12 @@ instance PrettyLambda Var TT where
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
-  prettyCat (Let bs a) =
+  prettyCat (LetRec bs a) =
     (text "let" <+> prettyBinds)
                 </> (text "in" <+> pretty a)
     where
       -- TODO pull out function args instead of pretty printing lambdas
-      prettyBinds = stack (prettyBind <$> bs)
+      prettyBinds = stack (prettyBind <$> Map.toUnfoldable bs)
       prettyBind (v /\ b) = pretty v <+> text "=" <+> pretty b      
   prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
   prettyCat (Native (Purescript { nativePretty })) = text nativePretty
@@ -256,10 +258,15 @@ instance
   ) => Inference Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
-  inference (Let bs a) = do
+  inference (LetRec bs a) = do
+     let bx :: List _
+         bx = Map.toUnfoldable bs
+     flip traverse_ bx $ \(v /\ _) -> do
+        t <- fresh
+        assume v t
      traverse_ (\(v /\ t) -> do
         t' <- t
-        assume v (head t')) bs
+        assume v (head t')) bx
      a
   inference (TypeAnnotation v t) = do
     (t' :: Cofree (LambdaF Var TT) Term) <- v
@@ -329,10 +336,10 @@ instance
   ) => Reduction Mu Var TT m where
   reduction =
     case _ of
-      Let bi bo -> do
+      LetRec bi bo -> do
          -- TODO desugar recursive block to a linear sequence of lets using fix
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
-         pure $ foldr (uncurry inline) bo bi
+         pure $ foldr (uncurry inline) bo (Map.toUnfoldable bi :: List _)
       c -> pure $ cat c
 

@@ -44,3 +44,5 @@ recSeq x = tailRec go (Nil /\ x)
               -- and rewrite using the `fix` operator
               Loop ((bou <> independents) /\ dependents)
             else Done (bou <> independents)
+
+

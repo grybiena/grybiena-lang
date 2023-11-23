@@ -16,12 +16,11 @@ import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Lambda.Calculus (absMany, app, cat, var)
 import Language.Lambda.Unification (class Fresh, fresh)
-import Language.Native (Native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
-import Language.Native.Reify (nativeTerm, reify)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
-import Language.Term.LetRec (recSeq)
+import Language.Native.Reify (nativeTerm, reify)
+import Language.Native (Native)
 import Parsing (ParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -74,7 +73,7 @@ parser mod = {
       ds <- tokenParser.braces (tokenParser.semiSep1 parseValueDecl)
       reserved "in"
       body <- parseValue
-      pure $ cat $ Let (recSeq $ Map.fromFoldable ds) body
+      pure $ cat $ LetRec (Map.fromFoldable ds) body
       where
         parseValueDecl = do
            v <- ((Ident <<< TermVar) <$> identifier) 
