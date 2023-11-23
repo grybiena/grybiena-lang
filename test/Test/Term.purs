@@ -155,7 +155,7 @@ termTests = runTest do
 
 
     testInferType "1 :: Int" "Int" 
-    testInferType "1 :: Int :: *" "(Int :: *)" 
+    testInferType "1 :: Int :: *" "Int" 
 
 
     testInferKind "forall a . a" "(t2 -> t2)"
@@ -167,7 +167,7 @@ termTests = runTest do
     testInferKind "*" "**"
     testInferKind "* -> *" "*"
 
-    testInferKind "* :: ** :: *** :: ****" "(** :: (*** :: ****))"
+    testInferKind "* :: ** :: *** :: ****" "**"
     testInferKind "**" "***"
 
     testInferKind "Int" "*"
@@ -226,6 +226,9 @@ termTests = runTest do
     testCompileEval "(\\x -> let { i = \\a -> intPlus a 1 } in i x) 1" (Assert.equal 2)
 
     testCompileEval "(\\x -> let { j = intPlus i 2; i = 1 } in x i j) intPlus" (Assert.equal 4)
+    testCompileEval "(\\x -> let { i = intPlus j 2; j = 1 } in x j i) intPlus" (Assert.equal 4)
+
+
 
 
 

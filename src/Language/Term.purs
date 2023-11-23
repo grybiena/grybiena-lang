@@ -22,10 +22,11 @@ import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, (:->:))
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, flat, infer, (:->:))
 import Language.Lambda.Reduction (class Basis, class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, assume, fresh, fromInt, substitute, unificationError, unify)
 import Language.Native (Native(..))
+import Language.Term.LetRec (recSeq)
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
@@ -39,7 +40,7 @@ data TT a =
     Star Int
   | Arrow
   | LetRec (Map Var a) a
-  | TypeAnnotation a Term
+  | TypeAnnotation a a
   | Native (Native Term)
 
 derive instance Generic (TT a) _
@@ -57,14 +58,14 @@ instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
   map f (LetRec bs a) = LetRec (f <$> bs) (f a)
-  map f (TypeAnnotation a t) = TypeAnnotation (f a) t
+  map f (TypeAnnotation a t) = TypeAnnotation (f a) (f t)
   map _ (Native n) = Native n
 
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
   traverse _ (Star i) = pure (Star i)
   traverse f (LetRec bs a) = LetRec <$> (traverse f bs) <*> f a
-  traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> (f a)
+  traverse f (TypeAnnotation a t) = TypeAnnotation <$> f a <*> f t
   traverse _ (Native n) = pure (Native n)
   sequence = traverse identity
 
@@ -269,9 +270,10 @@ instance
         assume v (head t')) bx
      a
   inference (TypeAnnotation v t) = do
-    (t' :: Cofree (LambdaF Var TT) Term) <- v
-    unify (t :: Term) (head t' :: Term)
-    pure (t :< tail t')
+    (vt :: Cofree (LambdaF Var TT) Term) <- v
+    (tt :: Cofree (LambdaF Var TT) Term) <- t
+    unify (flat tt :: Term) (head vt :: Term)
+    pure (flat tt :< tail vt)
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
 instance
@@ -340,6 +342,6 @@ instance
          -- TODO desugar recursive block to a linear sequence of lets using fix
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
-         pure $ foldr (uncurry inline) bo (Map.toUnfoldable bi :: List _)
+         pure $ foldr (uncurry inline) bo (recSeq bi)
       c -> pure $ cat c
 
