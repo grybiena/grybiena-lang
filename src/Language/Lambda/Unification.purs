@@ -14,7 +14,7 @@ import Data.Maybe (Maybe(..))
 import Data.Set as Set
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class Shadow, LambdaF(..), freeIn, replace, replaceFree, shadow, universe, var)
+import Language.Lambda.Calculus (class Shadow, LambdaF(..), occursIn, replace, replaceFree, shadow, universe, var)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
@@ -189,7 +189,7 @@ instance
      t <- rewrite t'
      -- TODO is this a strong enough check?
      -- i.e. is rewriting { a ~> forall a. a -> a } sound or going to result in doom?
-     when (v `freeIn` t) $ throwError $ infiniteTypeError v t 
+     when (v `occursIn` t) $ throwError $ infiniteTypeError v t 
      u <- rewrite (var v :: f (LambdaF var' cat'))
      case project u of
         Var v' | v' == v -> pure unit 
