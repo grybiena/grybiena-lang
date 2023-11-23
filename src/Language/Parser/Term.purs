@@ -89,7 +89,7 @@ parser mod = {
     parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLetRec <|> (parens parseValue)
     
     parseTypeLit :: ParserT String m Term
-    parseTypeLit = char '@' *> parseTypeAtom 
+    parseTypeLit = char '@' *> ((cat <<< TypeLit) <$> parseTypeAtom)
     
     parseNumeric ::  ParserT String m Term
     parseNumeric = (try parseNumber) <|> parseInt

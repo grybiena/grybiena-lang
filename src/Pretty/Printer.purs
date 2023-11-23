@@ -1,9 +1,11 @@
 module Pretty.Printer where
 
-import Control.Category (identity)
+import Control.Category (identity, (<<<))
 import Data.Functor.Mu (Mu(..))
+import Data.Show (show)
+import Data.TacitString (TacitString)
 import Language.Lambda.Calculus (class PrettyLambda, Lambda, LambdaF(..), prettyAbs, prettyApp, prettyCat, prettyVar)
-import Prettier.Printer (DOC)
+import Prettier.Printer (DOC, text)
 import Prettier.Printer as PP
 
 
@@ -13,6 +15,8 @@ class Pretty a where
 instance Pretty DOC where
   pretty = identity
 else
+instance Pretty TacitString where
+  pretty = text <<< show
 instance PrettyLambda var cat => Pretty (Lambda var cat) where
   pretty (In l) =
     case l of

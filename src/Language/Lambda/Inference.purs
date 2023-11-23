@@ -112,12 +112,19 @@ appRule f a = do
       void $ unify arrArg argTy
       arrRet' <- rewrite arrRet
       pure $ arrRet' :< (App f a)
-      where
-        unifyWithArrow t = do
-           argTy' <- fresh
-           retTy <- fresh
-           _ <- unify (argTy' :->: retTy) t     
-           Tuple <$> rewrite argTy' <*> rewrite retTy
+
+unifyWithArrow :: forall m exp.
+                  Bind m
+               => Fresh exp m
+               => Unify exp exp m
+               => Arrow exp
+               => Rewrite exp m
+               => exp -> m (Tuple exp exp)
+unifyWithArrow t = do
+   argTy' <- fresh
+   retTy <- fresh
+   _ <- unify (argTy' :->: retTy) t     
+   Tuple <$> rewrite argTy' <*> rewrite retTy
 
 flat :: forall typ var cat.
         Functor cat

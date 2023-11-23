@@ -17,12 +17,13 @@ import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
-import Effect.Class (liftEffect)
+import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Console (log)
 import Language.Kernel.Effect (effectNatives)
 import Language.Kernel.Pure (pureModule)
 import Language.Lambda.Calculus (LambdaF(..))
-import Language.Lambda.Inference (infer)
-import Language.Lambda.Reduction (elimAbs, reduce)
+import Language.Lambda.Inference (flat, infer)
+import Language.Lambda.Reduction (elimAbs, elimAbs', reduce)
 import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
 import Language.Native (Native(..))
 import Language.Native.Meta (metaModule)
@@ -99,24 +100,25 @@ termTests = runTest do
 
     -- I
     testInferType "\\x -> x" "(t1 -> t1)"
-    testInferSkiType "\\x -> x" "(t1 -> t1)"
+    testInferSkiType "\\x -> x" "(forall t1 . (t1 -> t1))"
 
     -- K
     testInferType "\\x y -> x" "(t1 -> (t2 -> t1))"
-    testInferSkiType "\\x y -> x" "(t1 -> (t2 -> t1))"
+    testInferSkiType "\\x y -> x" "(t3 -> (t2 -> t3))"
 
 
     testInferType "\\x y -> y" "(t1 -> (t2 -> t2))" 
-    testInferSkiType "\\x y -> y" "(t2 -> (t3 -> t3))"
+    testInferSkiType "\\x y -> y" "(t2 -> (forall t3 . (t3 -> t3)))"
 
     testInferType "\\x -> let { i = 1 } in x i" "((Int -> t4) -> t4)"
     testInferType "\\x -> let { i = 1; j = 2 } in x i j" "((Int -> (Int -> t7)) -> t7)"
     testInferType "\\x -> let { i = \\a -> intPlus a 1 } in i x" "(Int -> Int)"
-    testInferType "\\x -> let { i = 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t11)) -> t11)"
-    testInferType "\\x -> let { j = intPlus i 2; i = 1 } in x i j" "((Int -> (Int -> t11)) -> t11)"
-    testInferType "\\x -> let { i = intPlus j 1; j = 2 } in x i j" "((Int -> (Int -> t11)) -> t11)"
+    testInferType "\\x -> let { i = 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t19)) -> t19)"
+    testInferType "\\x -> let { j = intPlus i 2; i = 1 } in x i j" "((Int -> (Int -> t19)) -> t19)"
+    testInferType "\\x -> let { i = intPlus j 1; j = 2 } in x i j" "((Int -> (Int -> t19)) -> t19)"
 
-    testInferType "\\x -> let { i = intPlus j 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t15)) -> t15)"
+
+    testInferType "\\x -> let { i = intPlus j 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t31)) -> t31)"
 
 
     -- eta reduction 
@@ -124,24 +126,19 @@ termTests = runTest do
     testInferSkiType "\\x y -> x y" "(t1 -> t1)"
 
     testInferType "\\x y z -> x y z" "((t2 -> (t3 -> t7)) -> (t2 -> (t3 -> t7)))"
-    testInferSkiType "\\x y z -> x y z" "(t1 -> t1)"
+    testInferSkiType "\\x y z -> x y z" "((t2 -> t4) -> (t2 -> t4))"
 
     testInferType "\\x y z a -> x y z a" "((t2 -> (t3 -> (t4 -> t10))) -> (t2 -> (t3 -> (t4 -> t10))))"
-    testInferSkiType "\\x y z a -> x y z a" "(t1 -> t1)"
-
-    testInferSkiType "\\x y z a -> x z y a" "((t5 -> (t4 -> t3)) -> (t4 -> (t5 -> t3)))"
-
-
+    testInferSkiType "\\x y z a -> x y z a" "((t2 -> (t3 -> t7)) -> (t2 -> (t3 -> t7)))"
 
     -- K
     testInferType "\\x y -> y x" "(t1 -> ((t1 -> t4) -> t4))"
-    testInferSkiType "\\x y -> y x" "(t5 -> ((t5 -> t3) -> t3))"
+    testInferSkiType "\\x y -> y x" "(t7 -> ((t7 -> t3) -> t3))"
 
     -- S
     testInferType "\\x y z -> (x z) (y z)" "((t3 -> (t7 -> t9)) -> ((t3 -> t7) -> (t3 -> t9)))"
     testInferType "\\x y z -> x z (y z)" "((t3 -> (t7 -> t9)) -> ((t3 -> t7) -> (t3 -> t9)))"
     testInferSkiType "\\x y z -> x z (y z)" "((t1 -> (t2 -> t3)) -> ((t1 -> t2) -> (t1 -> t3)))"
-
 
     testInferType "1" "Int"
     testInferType "1.0" "Number"
@@ -217,7 +214,28 @@ termTests = runTest do
                         n <- liftEffect out
                         Assert.equal 4.0 n
                     )
+
+    testCompileEval "pureEffect @Number (numPlus (numPlus 1.0 1.0) (numPlus 1.0 1.0))"
+                    (\(out :: Effect Number) -> do
+                        n <- liftEffect out
+                        Assert.equal 4.0 n
+                    )
+
     testCompileEval "\\x -> pureEffect (numPlus 1.0 x)"
+                    (\(out :: Number -> Effect Number) -> do
+                        n <- liftEffect (out 3.0)
+                        Assert.equal 4.0 n
+                    )
+
+
+    testCompileEval "\\x -> pureEffect @Number (numPlus 1.0 x)"
+                    (\(out :: Number -> Effect Number) -> do
+                        n <- liftEffect (out 3.0)
+                        Assert.equal 4.0 n
+                    )
+
+
+    testCompileEval "\\x -> pureEffect @Number (numPlus 1.0 x)"
                     (\(out :: Number -> Effect Number) -> do
                         n <- liftEffect (out 3.0)
                         Assert.equal 4.0 n
@@ -328,17 +346,32 @@ compile :: forall t m.
         => MonadThrow (UnificationError Identity) m
         => Fresh Int m
         => MonadRec m
+        => MonadEffect m
         => String -> Proxy t -> m (Either CompileError t) 
 compile s ty = do
     t <- termParser s
     case t of
       Left err -> pure $ Left $ ParseError err
       Right val -> do
-        out <- reduce val >>= elimAbs >>= reduce
+--        liftEffect $ log $ prettyPrint val
+--        out <- reduce val >>= elimAbs >>= reduce
+        ired <- reduce val
+--        liftEffect $ log $ prettyPrint ired
+
+--        inte <- infer ired >>= elimAbs'
+        inte <- elimAbs ired
+--        liftEffect $ log $ prettyPrint (flat inte) <> " :: " <> prettyPrint (head inte)
+--        liftEffect $ log $ show $ flat inte
+
+
+--        out <- reduce (flat inte)
+        out <- reduce inte
+--        liftEffect $ log $ prettyPrint out
+
         case project out of
           Cat (Native (Purescript { nativeType, nativeTerm })) -> do
             let tyt = reify ty
-            if tyt == nativeType
+            if prettyPrint tyt == prettyPrint nativeType
               then pure $ Right $ unsafeCoerce nativeTerm
               else pure $ Left $ TypeError $ prettyPrint tyt <> " =?= " <> prettyPrint nativeType
           _ -> pure $ Left $ ReductionError $ prettyPrint out 
