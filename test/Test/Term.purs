@@ -117,6 +117,8 @@ termTests = runTest do
 
     testInferType "\\x -> let { i = intPlus j 1; j = 2 } in x i j" "((Int -> (Int -> t9)) -> t9)"
 
+--    testInferType "\\x -> let { i = intPlus j 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t9)) -> t9)"
+
 
     -- eta reduction 
     testInferType "\\x y -> x y" "((t2 -> t4) -> (t2 -> t4))"
