@@ -14,7 +14,7 @@ import Language.Lambda.Calculus (class Shadow, LambdaF)
 import Language.Lambda.Unification (class Fresh, renameFresh)
 import Language.Native (Native(..))
 import Language.Native.Module (NativeModule)
-import Language.Parser.Class (class StringParserT, class TypeParser, parseType, runStringParserT)
+import Language.Parser.Basis (class StringParserT, class BasisParser, parseBasis, runStringParserT)
 import Matryoshka (class Corecursive, class Recursive)
 import Parsing (ParseError)
 import Prim.RowList (class RowToList)
@@ -51,7 +51,7 @@ instance
   , Foldable cat
   , Recursive (f (LambdaF var cat)) (LambdaF var cat)
   , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-  , TypeParser t m f var cat
+  , BasisParser t m f var cat
   , StringParserT t m
   ) => MappingWithIndex (UnsafeNativeTerm t) (Proxy sym) (UnsafeNative typ) (m (Native (f (LambdaF var cat)))) where
   mappingWithIndex UnsafeNativeTerm = \i t -> unsafeNative (Proxy :: Proxy t) (reflectSymbol i) t
@@ -69,14 +69,14 @@ unsafeNative :: forall typ f var cat t m .
            => Foldable cat
            => Recursive (f (LambdaF var cat)) (LambdaF var cat)
            => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-           => TypeParser t m f var cat
+           => BasisParser t m f var cat
            => StringParserT t m
            => Proxy t
            -> String
            -> UnsafeNative typ
            -> m (Native (f (LambdaF var cat)))
 unsafeNative _ nativePretty (UnsafeNative nativeTerm) = do
-  t <- runStringParserT (reflectSymbol (Proxy :: Proxy typ)) (parseType :: t m (f (LambdaF var cat)))
+  t <- runStringParserT (reflectSymbol (Proxy :: Proxy typ)) (parseBasis :: t m (f (LambdaF var cat)))
   flip (either throwError) t $ \nt -> do
      nativeType <- renameFresh nt
      pure $ Purescript { nativeType

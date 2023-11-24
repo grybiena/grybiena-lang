@@ -23,7 +23,7 @@ import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
 import Language.Native (Native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
 import Language.Native.Reify (nativeTerm, reify)
-import Language.Parser.Class (class StringParserT, class TypeParser)
+import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
 import Parsing (ParserT, runParserT)
@@ -35,8 +35,8 @@ import Type.Proxy (Proxy(..))
 
 instance
   ( MonadState (TypingContext Var Mu Var TT) m
-  ) => TypeParser Parser m Mu Var TT where
-  parseType = do
+  ) => BasisParser Parser m Mu Var TT where
+  parseBasis = do
     t <- (parser (homogeneous {})).parseType
     Parser eof
     pure t

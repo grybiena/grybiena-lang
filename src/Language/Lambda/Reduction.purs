@@ -4,24 +4,14 @@ module Language.Lambda.Reduction where
 
 import Prelude
 
-import Control.Monad.Error.Class (class MonadThrow)
-import Control.Monad.Rec.Class (class MonadRec)
-import Control.Monad.State (class MonadState)
-import Data.Foldable (class Foldable)
-import Data.Homogeneous.Record (fromHomogeneous)
 import Data.Traversable (class Traversable, traverse)
-import Language.Kernel.Basis (basis)
-import Language.Lambda.Calculus (class Shadow, LambdaF(..), abs, app, cat, freeIn, var)
+import Language.Lambda.Basis (class Basis, basisI, basisK, basisS)
+import Language.Lambda.Calculus (LambdaF(..), abs, app, cat, freeIn, var)
 import Language.Lambda.Inference (class IsType)
-import Language.Lambda.Unification (class Fresh, TypingContext)
-import Language.Native (class NativeValue, native)
-import Language.Native.Unsafe (unsafeModule)
-import Language.Parser.Class (class StringParserT, class TypeParser)
 import Matryoshka.Algebra (AlgebraM)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Fold (cataM)
-import Parsing (ParseError)
 import Type.Proxy (Proxy)
 
 class Composition f var cat m where 
@@ -96,30 +86,4 @@ elimAbs p lam =
            k <- basisK p
            app k <$> (elimAbs p e)
     Cat c -> cat <$> (traverse (elimAbs p) c)
-
-
-class (Monad (t m), Monad m) <= Basis t m f var cat where
-  basisS :: Proxy t -> m (f (LambdaF var cat)) 
-  basisK :: Proxy t -> m (f (LambdaF var cat)) 
-  basisI :: Proxy t -> m (f (LambdaF var cat)) 
-
-instance
-  ( MonadRec m
-  , MonadThrow ParseError m
-  , MonadState (TypingContext var f var cat) m
-  , NativeValue f var cat
-  , Fresh var m
-  , Ord var
-  , Shadow var
-  , Foldable cat
-  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-  , TypeParser t m f var cat
-  , StringParserT t m
-  ) => Basis t m f var cat where
-  basisS p = native <$> (fromHomogeneous (unsafeModule p basis))."S"
-  basisK p = native <$> (fromHomogeneous (unsafeModule p basis))."K"
-  basisI p = native <$> (fromHomogeneous (unsafeModule p basis))."I"
-
-
 
