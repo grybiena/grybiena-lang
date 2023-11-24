@@ -7,11 +7,11 @@ import Data.Symbol (class IsSymbol, reflectSymbol)
 import Effect (Effect)
 import Heterogeneous.Mapping (class MapRecordWithIndex, class MappingWithIndex, hmapWithIndex)
 import Language.Lambda.Calculus (app, cat)
+import Language.Native (Native(..))
 import Language.Native.Module (NativeModule)
 import Language.Term (TT(..), Term)
 import Language.Type (Type, primitiveTypeConstructors)
-import Language.Native (Native(..))
-import Prim (Constraint, Int, Number, Record, String)
+import Prim (Boolean, Constraint, Int, Number, Record, String)
 import Prim.RowList (class RowToList)
 import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
@@ -59,5 +59,9 @@ instance Reify Int where
 
 instance Reify Number where
   reify _ = cat (Native (nativeTerm "Number" primitiveTypeConstructors."Number"))
+
+instance Reify Boolean where
+  reify _ = cat (Native (nativeTerm "Boolean" primitiveTypeConstructors."Boolean"))
+
 
 

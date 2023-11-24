@@ -11,18 +11,20 @@ import Control.Monad.State (class MonadState)
 import Data.Array (fromFoldable, replicate)
 import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
-import Data.Homogeneous.Record (homogeneous)
+import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
 import Data.List ((..))
 import Data.Map as Map
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (fst, uncurry)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
+import Language.Kernel.Prim (primNatives)
 import Language.Lambda.Calculus (absMany, app, cat, var)
 import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
-import Language.Native (Native)
+import Language.Native (Native, native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
 import Language.Native.Reify (nativeTerm, reify)
+import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
@@ -58,6 +60,7 @@ type TermParser m =
 
 parser :: forall names row m.
           Fresh Int m
+       => MonadState (TypingContext Var Mu Var TT) m
        => ToHomogeneousRow names (ParserT String m (Native Term)) row
        => NativeModule names (ParserT String m (Native Term))
        -> TermParser m
@@ -109,7 +112,7 @@ parser mod = {
     parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
     
     parseValueAtom :: ParserT String m Term
-    parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLetRec <|> (parens parseValue)
+    parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLetRec <|> parseIfElse <|> (parens parseValue)
     
     parseTypeLit :: ParserT String m Term
     parseTypeLit = char '@' *> ((cat <<< TypeLit) <$> parseTypeAtom)
@@ -128,6 +131,18 @@ parser mod = {
      
     parseNumber ::  ParserT String m Term
     parseNumber = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> number 
+
+    parseIfElse :: ParserT String m Term
+    parseIfElse = do
+      reserved "if"
+      x <- parseValue
+      reserved "then"
+      a <- parseValue
+      reserved "else"
+      b <- parseValue
+      i <- native <$> (fromHomogeneous (unsafeModule (Proxy :: Proxy Parser) primNatives))."ifElse"
+      pure $ app (app (app i x) a) b
+
     
     parseTypeAnnotation :: Term -> ParserT String m Term
     parseTypeAnnotation v = do

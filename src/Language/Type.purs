@@ -25,12 +25,14 @@ instance Pretty Type where
 primitiveTypeConstructors :: Record 
   ( "Int" :: Type
   , "Number" :: Type
+  , "Boolean" :: Type
   , "Effect" :: Type -> Type
   , "Maybe" :: Type -> Type
   )
 primitiveTypeConstructors = 
   { "Int": TypeConstructor "Int"
   , "Number": TypeConstructor "Number"
+  , "Boolean": TypeConstructor "Boolean"
   , "Effect": TypeApp (TypeConstructor "Effect")
   , "Maybe": TypeApp (TypeConstructor "Maybe")
   }

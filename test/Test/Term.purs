@@ -247,6 +247,10 @@ termTests = runTest do
     testCompileEval "(\\x -> let { j = intPlus i 2; i = 1 } in x i j) intPlus" (Assert.equal 4)
     testCompileEval "(\\x -> let { i = intPlus j 2; j = 1 } in x j i) intPlus" (Assert.equal 4)
 
+    testCompileEval "(\\x -> if x then 1 else 0) true" (Assert.equal 1)
+    testCompileEval "(\\x -> if x then 1 else 0) false" (Assert.equal 0)
+
+
 
 
 
