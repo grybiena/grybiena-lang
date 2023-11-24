@@ -380,7 +380,7 @@ compile s ty = do
 
 typeParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term) 
 typeParser s = runParserT s do
-  let someKernel = nativeModuleUnion (nativeModule pureModule) (unsafeModule effectNatives)
+  let someKernel = nativeModuleUnion (nativeModule pureModule) (unsafeModule (parser (nativeModule {})).parseType effectNatives)
   v <- (parser someKernel).parseType
   eof
   pure v
@@ -389,7 +389,7 @@ typeParser s = runParserT s do
 termParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term)
 termParser s = runParserT s do
   let mm :: NativeModule _ (ParserT String m (Native Term))
-      mm = (unsafeModule effectNatives)
+      mm = (unsafeModule (parser (nativeModule {})).parseType effectNatives)
       someKernel = nativeModuleUnion (nativeModule pureModule) mm 
   v <- (parser someKernel).parseValue
   eof
