@@ -230,28 +230,6 @@ instance
       _ -> substitute v t
 
 
-
-instance
-  ( MonadThrow (UnificationError n) m
-  , Fresh Var m
-  , Skolemize Mu Var TT
-  , MonadState (TypingContext Var Mu Var TT) m
-  ) => Unify (TT Term) Term m where
-  unify a@(Star i) t = do
-    (k :: Cofree (LambdaF Var TT) Term) <- infer t
-    case project $ head k of
-      -- FIXME trying to enforce cumulativity
-      -- (* -> *) needs to type to **
-      -- then * unifies with (* -> *) since * < **
-      -- or something like that...
-      -- so this should be a strict <
-      -- but since (* -> *) types to * right now it ain't right
-      -- TODO going to need some type level Nats for this
-      Cat (Star j) | i < j -> pure unit
-      _ -> throwError $ unificationError (cat a) t
-  unify a b = throwError $ unificationError (cat a) b
-
-
 instance
   ( MonadThrow (UnificationError n) m
   , Fresh Var m

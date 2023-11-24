@@ -55,3 +55,4 @@ nativeModule :: forall ra names var term.
              -> Module var term
 nativeModule = Map.fromFoldable <<< map bind <<< moduleListing
   where bind (b /\ t) = binding b /\ t
+

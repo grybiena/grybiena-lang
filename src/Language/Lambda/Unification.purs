@@ -80,7 +80,6 @@ instance
   , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
   , Unify (cat (f (LambdaF var cat))) (cat (f (LambdaF var cat))) m
   , Unify var (f (LambdaF var cat)) m
-  , Unify (cat (f (LambdaF var cat))) (f (LambdaF var cat)) m 
   , UnificationError (f (LambdaF var cat)) err
   , Skolemize f var cat
   , MonadThrow err m
@@ -102,7 +101,6 @@ instance
        App ab aa /\ App bb ba -> do
          unify ab bb *> unify aa ba
        Cat ca /\ Cat cb -> unify ca cb
-       Cat a /\ _ -> unify a tb
        _ -> throwError $ unificationError ta tb
 
 
@@ -183,7 +181,6 @@ instance
   , InfiniteTypeError var' (f (LambdaF var' cat')) err
   , Unify (cat' (f (LambdaF var' cat'))) (cat' (f (LambdaF var' cat'))) m
   , Unify var' (f (LambdaF var' cat')) m
-  , Unify (cat' (f (LambdaF var' cat'))) (f (LambdaF var' cat')) m 
   , UnificationError (f (LambdaF var' cat')) err
   , MonadThrow err m
   , Shadow var' -- TODO is it safe to only consider shadows?

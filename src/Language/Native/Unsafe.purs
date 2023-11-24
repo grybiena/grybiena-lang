@@ -1,4 +1,4 @@
-module Language.Native.Meta where
+module Language.Native.Unsafe where
 
 import Prelude
 
@@ -22,38 +22,38 @@ import Type.Proxy (Proxy)
 import Unsafe.Coerce (unsafeCoerce)
 
 
-metaModule :: forall m mod names het listing.
+unsafeModule :: forall m mod names het listing.
 
      HomogeneousRowLabels het (m (Native Term)) listing 
   => RowToList mod names 
-  => MapRecordWithIndex names MetaNativeTerm mod het 
+  => MapRecordWithIndex names UnsafeNativeTerm mod het 
   => MonadRec m
   => Fresh Int m
   => Record mod
   -> NativeModule listing (m (Native Term))
-metaModule r = let (x :: Record het) = hmapWithIndex MetaNativeTerm r in homogeneous x 
+unsafeModule r = let (x :: Record het) = hmapWithIndex UnsafeNativeTerm r in homogeneous x 
 
-newtype MetaNative = MetaNative { metaType :: String, nativeTerm :: forall a. a }
+newtype UnsafeNative = UnsafeNative { unsafeType :: String, nativeTerm :: forall a. a }
 
-data MetaNativeTerm = MetaNativeTerm
+data UnsafeNativeTerm = UnsafeNativeTerm
 
 instance
   ( IsSymbol sym
   , MonadRec m
   , MonadThrow ParseError m
   , Fresh Int m
-  ) => MappingWithIndex MetaNativeTerm (Proxy sym) MetaNative (m (Native Term)) where
-  mappingWithIndex MetaNativeTerm = \i t -> metaNative (reflectSymbol i) t
+  ) => MappingWithIndex UnsafeNativeTerm (Proxy sym) UnsafeNative (m (Native Term)) where
+  mappingWithIndex UnsafeNativeTerm = \i t -> unsafeNative (reflectSymbol i) t
 
 
 
-metaNative :: forall m .
+unsafeNative :: forall m .
               MonadRec m
            => MonadThrow ParseError m
            => Fresh Int m
-           => String -> MetaNative -> m (Native Term)
-metaNative nativePretty (MetaNative { metaType, nativeTerm }) = do
-  t <- runParserT metaType do
+           => String -> UnsafeNative -> m (Native Term)
+unsafeNative nativePretty (UnsafeNative { unsafeType, nativeTerm }) = do
+  t <- runParserT unsafeType do
      v <- (parser (nativeModule {})).parseType
      eof
      pure v

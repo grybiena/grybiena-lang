@@ -3,36 +3,36 @@ module Language.Kernel.Effect where
 import Prelude
 
 import Effect (Effect)
-import Language.Native.Meta (MetaNative(..))
+import Language.Native.Unsafe (UnsafeNative(..))
 import Unsafe.Coerce (unsafeCoerce)
 
 
 
-pureEffect :: MetaNative
+pureEffect :: UnsafeNative
 pureEffect =
-  MetaNative
-    { metaType: "forall a. a -> Effect a"
+  UnsafeNative
+    { unsafeType: "forall a. a -> Effect a"
     , nativeTerm:
-        let prim :: forall a. a -> Effect a
-            prim = pure
-         in unsafeCoerce prim
+        let exp :: forall a. a -> Effect a
+            exp = pure
+         in unsafeCoerce exp
     }
 
  
-bindEffect :: MetaNative
+bindEffect :: UnsafeNative
 bindEffect = 
-  MetaNative
-    { metaType: "forall a b. Effect a -> (a -> Effect b) -> Effect b"
+  UnsafeNative
+    { unsafeType: "forall a b. Effect a -> (a -> Effect b) -> Effect b"
     , nativeTerm:
-        let prim :: forall a b. Effect a -> (a -> Effect b) -> Effect b
-            prim = (>>=)
-         in unsafeCoerce prim
+        let exp :: forall a b. Effect a -> (a -> Effect b) -> Effect b
+            exp = (>>=)
+         in unsafeCoerce exp
     }
 
 
 effectNatives ::
-  { bindEffect :: MetaNative
-  , pureEffect :: MetaNative
+  { bindEffect :: UnsafeNative
+  , pureEffect :: UnsafeNative
   }
 effectNatives = 
   { "pureEffect": pureEffect
