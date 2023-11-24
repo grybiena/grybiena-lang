@@ -18,7 +18,7 @@ import Language.Term (Term)
 import Parsing (ParseError, runParserT)
 import Parsing.String (eof)
 import Prim.RowList (class RowToList)
-import Type.Proxy (Proxy)
+import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -33,27 +33,29 @@ unsafeModule :: forall m mod names het listing.
   -> NativeModule listing (m (Native Term))
 unsafeModule r = let (x :: Record het) = hmapWithIndex UnsafeNativeTerm r in homogeneous x 
 
-newtype UnsafeNative = UnsafeNative { unsafeType :: String, nativeTerm :: forall a. a }
+newtype UnsafeNative (unsafeType :: Symbol) = UnsafeNative (forall a. a)
 
 data UnsafeNativeTerm = UnsafeNativeTerm
 
 instance
   ( IsSymbol sym
+  , IsSymbol typ
   , MonadRec m
   , MonadThrow ParseError m
   , Fresh Int m
-  ) => MappingWithIndex UnsafeNativeTerm (Proxy sym) UnsafeNative (m (Native Term)) where
+  ) => MappingWithIndex UnsafeNativeTerm (Proxy sym) (UnsafeNative typ) (m (Native Term)) where
   mappingWithIndex UnsafeNativeTerm = \i t -> unsafeNative (reflectSymbol i) t
 
 
 
-unsafeNative :: forall m .
+unsafeNative :: forall typ m .
               MonadRec m
            => MonadThrow ParseError m
            => Fresh Int m
-           => String -> UnsafeNative -> m (Native Term)
-unsafeNative nativePretty (UnsafeNative { unsafeType, nativeTerm }) = do
-  t <- runParserT unsafeType do
+           => IsSymbol typ
+           => String -> UnsafeNative typ -> m (Native Term)
+unsafeNative nativePretty (UnsafeNative nativeTerm) = do
+  t <- runParserT (reflectSymbol (Proxy :: Proxy typ)) do
      v <- (parser (nativeModule {})).parseType
      eof
      pure v
