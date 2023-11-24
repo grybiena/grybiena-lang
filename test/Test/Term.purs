@@ -18,12 +18,11 @@ import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Console (log)
 import Language.Kernel.Effect (effectNatives)
 import Language.Kernel.Pure (pureModule)
 import Language.Lambda.Calculus (LambdaF(..))
-import Language.Lambda.Inference (flat, infer)
-import Language.Lambda.Reduction (elimAbs, elimAbs', reduce)
+import Language.Lambda.Inference (infer)
+import Language.Lambda.Reduction (elimAbs, reduce)
 import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
 import Language.Native (Native(..))
 import Language.Native.Meta (metaModule)
@@ -113,12 +112,12 @@ termTests = runTest do
     testInferType "\\x -> let { i = 1 } in x i" "((Int -> t4) -> t4)"
     testInferType "\\x -> let { i = 1; j = 2 } in x i j" "((Int -> (Int -> t7)) -> t7)"
     testInferType "\\x -> let { i = \\a -> intPlus a 1 } in i x" "(Int -> Int)"
-    testInferType "\\x -> let { i = 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t19)) -> t19)"
-    testInferType "\\x -> let { j = intPlus i 2; i = 1 } in x i j" "((Int -> (Int -> t19)) -> t19)"
-    testInferType "\\x -> let { i = intPlus j 1; j = 2 } in x i j" "((Int -> (Int -> t19)) -> t19)"
+    testInferType "\\x -> let { i = 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t11)) -> t11)"
+    testInferType "\\x -> let { j = intPlus i 2; i = 1 } in x i j" "((Int -> (Int -> t11)) -> t11)"
+    testInferType "\\x -> let { i = intPlus j 1; j = 2 } in x i j" "((Int -> (Int -> t11)) -> t11)"
 
 
-    testInferType "\\x -> let { i = intPlus j 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t31)) -> t31)"
+    testInferType "\\x -> let { i = intPlus j 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t15)) -> t15)"
 
 
     -- eta reduction 
@@ -273,6 +272,7 @@ testInferSkiType v t = test ("(" <> v <> ") :: " <> t) $ do
       Right (val :: Term) -> do
         ski <- elimAbs val
 --        liftEffect $ log $ prettyPrint ski
+--        liftEffect $ log $ show ski
         (i :: Term) <- head <$> infer ski
         liftAff $ Assert.equal t (prettyPrint i)
   case e of
@@ -353,19 +353,18 @@ compile s ty = do
     case t of
       Left err -> pure $ Left $ ParseError err
       Right val -> do
---        liftEffect $ log $ prettyPrint val
---        out <- reduce val >>= elimAbs >>= reduce
-        ired <- reduce val
+        out <- reduce val >>= elimAbs >>= reduce
+----        liftEffect $ log $ prettyPrint val
+--
+--        ired <- reduce val
 --        liftEffect $ log $ prettyPrint ired
-
---        inte <- infer ired >>= elimAbs'
-        inte <- elimAbs ired
---        liftEffect $ log $ prettyPrint (flat inte) <> " :: " <> prettyPrint (head inte)
---        liftEffect $ log $ show $ flat inte
-
-
---        out <- reduce (flat inte)
-        out <- reduce inte
+--
+--        inte <- elimAbs ired
+--        liftEffect $ log $ show $ inte
+--
+--
+----        out <- reduce (flat inte)
+--        out <- reduce inte
 --        liftEffect $ log $ prettyPrint out
 
         case project out of

@@ -22,7 +22,7 @@ import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, replaceFree, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, flat, infer, unifyWithArrow, (:->:))
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, unifyWithArrow, (:->:))
 import Language.Lambda.Reduction (class Basis, class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, assume, fresh, fromInt, rewrite, substitute, unificationError, unify)
 import Language.Native (Native(..))
@@ -40,9 +40,9 @@ data TT a =
     Star Int
   | Arrow
   | LetRec (Map Var a) a
-  | TypeAnnotation a a
-  | TypeLit a
-  | Native (Native a)
+  | TypeAnnotation a Term
+  | TypeLit Term
+  | Native (Native Term)
 
 derive instance Generic (TT a) _
 
@@ -59,17 +59,17 @@ instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
   map f (LetRec bs a) = LetRec (f <$> bs) (f a)
-  map f (TypeAnnotation a t) = TypeAnnotation (f a) (f t)
-  map f (TypeLit a) = TypeLit (f a)
-  map f (Native (Purescript n)) = Native (Purescript (n { nativeType = f n.nativeType }))
+  map f (TypeAnnotation a t) = TypeAnnotation (f a) t
+  map _ (TypeLit t) = TypeLit t
+  map _ (Native n) = Native n 
 
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
   traverse _ (Star i) = pure (Star i)
   traverse f (LetRec bs a) = LetRec <$> (traverse f bs) <*> f a
-  traverse f (TypeAnnotation a t) = TypeAnnotation <$> f a <*> f t
-  traverse f (TypeLit a) = TypeLit <$> f a
-  traverse f (Native (Purescript n)) = (\u -> Native (Purescript n { nativeType = u })) <$> f n.nativeType
+  traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> f a
+  traverse _ (TypeLit t) = pure $ TypeLit t
+  traverse _ (Native n) = pure $ Native n 
   sequence = traverse identity
 
 instance Skolemize Mu Var TT where
@@ -247,7 +247,7 @@ instance
       -- so this should be a strict <
       -- but since (* -> *) types to * right now it ain't right
       -- TODO going to need some type level Nats for this
-      Cat (Star j) | i <= j -> pure unit
+      Cat (Star j) | i < j -> pure unit
       _ -> throwError $ unificationError (cat a) t
   unify a b = throwError $ unificationError (cat a) b
 
@@ -296,13 +296,11 @@ instance
      a
   inference (TypeAnnotation v t) = do
     (vt :: Cofree (LambdaF Var TT) Term) <- v
-    (tt :: Cofree (LambdaF Var TT) Term) <- t
-    unify (flat tt :: Term) (head vt :: Term)
-    pure (flat tt :< tail vt)
-  inference (TypeLit a) = a
-  inference (Native (Purescript n)) = do
-     (nt :: Cofree (LambdaF Var TT) Term) <- n.nativeType
-     pure $ flat nt :< Cat (Native (Purescript (n { nativeType = nt})))
+    unify (head vt :: Term) t
+    vt' <- rewrite (head vt)
+    pure (vt' :< tail vt)
+  inference (TypeLit t) = infer t 
+  inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
 instance
   ( Monad n
@@ -356,22 +354,11 @@ instance
         unify arrArg t
         rewrite a
       Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) -> do
---        arrArg /\ _ <- unifyWithArrow na.nativeType
---        unify arrArg nb.nativeType
---        a' <- rewrite a
---        nativeType <- head <$> infer (app a' b)
         nativeType <- head <$> infer (app a b)
         pure $ cat (Native (Purescript { nativeType
                                        , nativePretty: "(" <> na.nativePretty <> " " <> nb.nativePretty <> ")"
                                        , nativeTerm: na.nativeTerm nb.nativeTerm
                                        }))
---      Cat (Native (Purescript na)) /\ _ -> do
---        arrArg /\ _ <- unifyWithArrow na.nativeType
---        bt <- infer b
---        unify arrArg (head bt)
---        a' <- rewrite a
---        pure $ app a' b
-
       _ -> pure $ app a b 
 
 instance
