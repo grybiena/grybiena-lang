@@ -6,8 +6,12 @@ import Prelude
 import Control.Alt ((<|>))
 import Control.Lazy (defer)
 import Control.Monad.Cont (lift)
+import Control.Monad.Rec.Class (class MonadRec)
+import Control.Monad.State (class MonadState)
 import Data.Array (fromFoldable, replicate)
+import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
+import Data.Homogeneous.Record (homogeneous)
 import Data.List ((..))
 import Data.Map as Map
 import Data.String.CodeUnits (fromCharArray)
@@ -15,32 +19,51 @@ import Data.Tuple (fst, uncurry)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Lambda.Calculus (absMany, app, cat, var)
-import Language.Lambda.Unification (class Fresh, fresh)
+import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
+import Language.Native (Native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
+import Language.Native.Reify (nativeTerm, reify)
+import Language.Parser.Class (class StringParserT, class TypeParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
-import Language.Native.Reify (nativeTerm, reify)
-import Language.Native (Native)
-import Parsing (ParserT)
+import Parsing (ParserT, runParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
-import Parsing.String (char)
+import Parsing.String (char, eof)
 import Parsing.Token (GenTokenParser, makeTokenParser)
 import Type.Proxy (Proxy(..))
 
-type Parser m =
-  { parseValue:: ParserT String m Term
-  , parseType :: ParserT String m Term
+instance
+  ( MonadState (TypingContext Var Mu Var TT) m
+  ) => TypeParser Parser m Mu Var TT where
+  parseType = do
+    t <- (parser (homogeneous {})).parseType
+    Parser eof
+    pure t
+
+instance MonadRec m => StringParserT Parser m where
+  runStringParserT s (Parser p) = runParserT s p
+
+newtype Parser m a = Parser (ParserT String m a)
+derive newtype instance Functor (Parser m)
+derive newtype instance Apply (Parser m)
+derive newtype instance Applicative (Parser m)
+derive newtype instance Bind (Parser m)
+derive newtype instance Monad m => Monad (Parser m)
+
+type TermParser m =
+  { parseValue:: Parser m Term
+  , parseType :: Parser m Term
   }
 
 parser :: forall names row m.
           Fresh Int m
        => ToHomogeneousRow names (ParserT String m (Native Term)) row
        => NativeModule names (ParserT String m (Native Term))
-       -> Parser m
+       -> TermParser m
 parser mod = {
-    parseValue: parseValue
-  , parseType: parseType
+    parseValue: Parser parseValue
+  , parseType: Parser parseType
   }
   where
     kernel :: Listing (ParserT String m (Native Term))

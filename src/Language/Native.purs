@@ -2,6 +2,7 @@ module Language.Native where
 
 import Prelude
 
+import Language.Lambda.Calculus (LambdaF)
 import Pretty.Printer (class Pretty, prettyPrint)
 
 newtype Native term = Purescript { nativeType :: term, nativePretty :: String, nativeTerm :: forall a. a }
@@ -11,4 +12,7 @@ instance Eq term => Eq (Native term) where
 
 instance Pretty term => Show (Native term) where
   show (Purescript { nativeType, nativePretty }) = "(" <> nativePretty <> " :: " <> prettyPrint nativeType <> ")"
+
+class NativeValue f var cat where
+  native :: Native (f (LambdaF var cat))-> f (LambdaF var cat)
 

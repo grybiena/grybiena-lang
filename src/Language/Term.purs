@@ -21,17 +21,16 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested ((/\))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), abs, absMany, app, cat, prettyVar, replaceFree, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, unifyWithArrow, (:->:))
-import Language.Lambda.Reduction (class Basis, class Composition, class Reduction)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, unifyWithArrow)
+import Language.Lambda.Reduction (class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, assume, fresh, fromInt, rewrite, substitute, unificationError, unify)
-import Language.Native (Native(..))
+import Language.Native (class NativeValue, Native(..))
 import Language.Term.LetRec (recSeq)
 import Matryoshka.Class.Recursive (project)
 import Prettier.Printer (stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
 import Prim (Boolean, Int, Number, Record, String)
-import Unsafe.Coerce (unsafeCoerce)
 
 type Term = Lambda Var TT
 
@@ -45,6 +44,9 @@ data TT a =
   | Native (Native Term)
 
 derive instance Generic (TT a) _
+
+instance NativeValue Mu Var TT where
+  native = cat <<< Native
 
 instance (Pretty a, Show a) => Show (TT a) where
   show (TypeAnnotation a t) = "TypeAnnotation " <> show a <> " " <> show t
@@ -279,44 +281,6 @@ instance
     pure (vt' :< tail vt)
   inference (TypeLit t) = infer t 
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
-
-instance
-  ( Monad n
-  , Fresh Var n
-  ) => Basis TT Term n where
-  basisS = do
-    a <- fresh
-    b <- fresh
-    c <- fresh
-    pure $ Native $ Purescript
-      { nativeType: absMany [a,b,c] ((var a :->: var b :->: var c) :->: (var a :->: var b) :->: var a :->: var c)
-      , nativePretty: "S"
-      , nativeTerm:
-          let prim :: forall a b c. (a -> b -> c) -> (a -> b) -> a -> c 
-              prim x y z = x z (y z)
-           in unsafeCoerce prim
-      }
-  basisK = do
-    a <- fresh
-    b <- fresh
-    pure $ Native $ Purescript
-      { nativeType: absMany [a,b] (var a :->: var b :->: var a)
-      , nativePretty: "K"
-      , nativeTerm:
-          let prim :: forall a b. a -> b -> a
-              prim = const
-           in unsafeCoerce prim
-      }
-  basisI = do
-    a <- fresh
-    pure $ Native $ Purescript
-      { nativeType: abs a (var a :->: var a)
-      , nativePretty: "I"
-      , nativeTerm:
-          let prim :: forall a. a -> a
-              prim = identity
-           in unsafeCoerce prim
-      }
 
 instance
   ( Monad m

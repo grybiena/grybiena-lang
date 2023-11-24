@@ -5,6 +5,7 @@ import Prelude
 import Control.Comonad.Cofree (head)
 import Control.Lazy (fix)
 import Control.Monad.Error.Class (class MonadThrow)
+import Control.Monad.Except (runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
 import Data.Either (Either(..))
@@ -25,13 +26,14 @@ import Language.Lambda.Inference (infer)
 import Language.Lambda.Reduction (elimAbs, reduce)
 import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
 import Language.Native (Native(..))
-import Language.Native.Unsafe (unsafeModule)
 import Language.Native.Module (NativeModule, nativeModuleUnion)
 import Language.Native.Reify (class Reify, nativeModule, reify)
-import Language.Parser.Term (parser)
+import Language.Native.Unsafe (unsafeModule)
+import Language.Parser.Class (runStringParserT)
+import Language.Parser.Term (Parser(..), parser)
 import Language.Term (TT(..), Term, UnificationError, Var)
 import Matryoshka.Class.Recursive (project)
-import Parsing (ParseError, ParserT, runParserT)
+import Parsing (ParseError, ParserT)
 import Parsing.String (eof)
 import Pretty.Printer (prettyPrint)
 import Test.Unit (TestSuite, suite, test)
@@ -99,15 +101,15 @@ termTests = runTest do
 
     -- I
     testInferType "\\x -> x" "(t1 -> t1)"
-    testInferSkiType "\\x -> x" "(forall t1 . (t1 -> t1))"
+    testInferSkiType "\\x -> x" "(forall t2 . (t2 -> t2))"
 
     -- K
     testInferType "\\x y -> x" "(t1 -> (t2 -> t1))"
-    testInferSkiType "\\x y -> x" "(t3 -> (t2 -> t3))"
+    testInferSkiType "\\x y -> x" "(t5 -> (t4 -> t5))"
 
 
     testInferType "\\x y -> y" "(t1 -> (t2 -> t2))" 
-    testInferSkiType "\\x y -> y" "(t2 -> (forall t3 . (t3 -> t3)))"
+    testInferSkiType "\\x y -> y" "(t4 -> (forall t6 . (t6 -> t6)))"
 
     testInferType "\\x -> let { i = 1 } in x i" "((Int -> t4) -> t4)"
     testInferType "\\x -> let { i = 1; j = 2 } in x i j" "((Int -> (Int -> t7)) -> t7)"
@@ -132,12 +134,12 @@ termTests = runTest do
 
     -- K
     testInferType "\\x y -> y x" "(t1 -> ((t1 -> t4) -> t4))"
-    testInferSkiType "\\x y -> y x" "(t7 -> ((t7 -> t3) -> t3))"
+    testInferSkiType "\\x y -> y x" "(t13 -> ((t13 -> t6) -> t6))"
 
     -- S
     testInferType "\\x y z -> (x z) (y z)" "((t3 -> (t7 -> t9)) -> ((t3 -> t7) -> (t3 -> t9)))"
     testInferType "\\x y z -> x z (y z)" "((t3 -> (t7 -> t9)) -> ((t3 -> t7) -> (t3 -> t9)))"
-    testInferSkiType "\\x y z -> x z (y z)" "((t1 -> (t2 -> t3)) -> ((t1 -> t2) -> (t1 -> t3)))"
+    testInferSkiType "\\x y z -> x z (y z)" "((t4 -> (t5 -> t6)) -> ((t4 -> t5) -> (t4 -> t6)))"
 
     testInferType "1" "Int"
     testInferType "1.0" "Number"
@@ -270,11 +272,15 @@ testInferSkiType v t = test ("(" <> v <> ") :: " <> t) $ do
     case vt of
       Left err -> liftAff $ Assert.assert ("parse error: " <> show err) false    
       Right (val :: Term) -> do
-        ski <- elimAbs val
---        liftEffect $ log $ prettyPrint ski
---        liftEffect $ log $ show ski
-        (i :: Term) <- head <$> infer ski
-        liftAff $ Assert.equal t (prettyPrint i)
+        ski <- runExceptT $ elimAbs (Proxy :: Proxy Parser) val
+        case ski of
+          Left err -> liftAff $ Assert.assert ("basis error: " <> show err) false    
+          Right su -> do
+
+    --        liftEffect $ log $ prettyPrint ski
+    --        liftEffect $ log $ show ski
+            (i :: Term) <- head <$> infer su
+            liftAff $ Assert.equal t (prettyPrint i)
   case e of
     Right _ -> pure unit
     Left (err :: UnificationError Identity) -> Assert.assert ("infer error: " <> prettyPrint err) false
@@ -335,6 +341,7 @@ data CompileError =
     ReductionError String
   | TypeError String
   | ParseError ParseError
+  | BasisError ParseError
 
 derive instance Generic CompileError _
 instance Show CompileError where
@@ -353,46 +360,49 @@ compile s ty = do
     case t of
       Left err -> pure $ Left $ ParseError err
       Right val -> do
-        out <- reduce val >>= elimAbs >>= reduce
+
 ----        liftEffect $ log $ prettyPrint val
 --
---        ired <- reduce val
+        ired <- reduce val
 --        liftEffect $ log $ prettyPrint ired
 --
---        inte <- elimAbs ired
+        inte <- runExceptT $ elimAbs (Proxy :: Proxy Parser) ired
 --        liftEffect $ log $ show $ inte
 --
 --
 ----        out <- reduce (flat inte)
---        out <- reduce inte
---        liftEffect $ log $ prettyPrint out
-
-        case project out of
-          Cat (Native (Purescript { nativeType, nativeTerm })) -> do
-            let tyt = reify ty
-            if prettyPrint tyt == prettyPrint nativeType
-              then pure $ Right $ unsafeCoerce nativeTerm
-              else pure $ Left $ TypeError $ prettyPrint tyt <> " =?= " <> prettyPrint nativeType
-          _ -> pure $ Left $ ReductionError $ prettyPrint out 
+        case inte of
+          Left err -> pure $ Left $ BasisError err
+          Right su -> do
+            out <- reduce su
+    --        liftEffect $ log $ prettyPrint out
+    
+            case project out of
+              Cat (Native (Purescript { nativeType, nativeTerm })) -> do
+                let tyt = reify ty
+                if prettyPrint tyt == prettyPrint nativeType
+                  then pure $ Right $ unsafeCoerce nativeTerm
+                  else pure $ Left $ TypeError $ prettyPrint tyt <> " =?= " <> prettyPrint nativeType
+              _ -> pure $ Left $ ReductionError $ prettyPrint out 
 
 
 
 
 typeParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term) 
-typeParser s = runParserT s do
-  let someKernel = nativeModuleUnion (nativeModule pureModule) (unsafeModule (parser (nativeModule {})).parseType effectNatives)
+typeParser s = runStringParserT s do
+  let someKernel = nativeModuleUnion (nativeModule pureModule) (unsafeModule (Proxy :: Proxy Parser) effectNatives)
   v <- (parser someKernel).parseType
-  eof
+  Parser eof
   pure v
 
 
 termParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term)
-termParser s = runParserT s do
+termParser s = runStringParserT s do
   let mm :: NativeModule _ (ParserT String m (Native Term))
-      mm = (unsafeModule (parser (nativeModule {})).parseType effectNatives)
+      mm = (unsafeModule (Proxy :: Proxy Parser) effectNatives)
       someKernel = nativeModuleUnion (nativeModule pureModule) mm 
   v <- (parser someKernel).parseValue
-  eof
+  Parser eof
   pure v
 
 

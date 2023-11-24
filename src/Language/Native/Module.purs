@@ -47,12 +47,23 @@ class Binding var where
   binding :: String -> var
 
 
-nativeModule :: forall ra names var term.
-                ToHomogeneousRow names term ra
+nativeModule :: forall terms names var term.
+                ToHomogeneousRow names term terms
              => Ord var
              => Binding var
              => NativeModule names term
              -> Module var term
 nativeModule = Map.fromFoldable <<< map bind <<< moduleListing
   where bind (b /\ t) = binding b /\ t
+
+
+type TypedModule terms = Record terms
+
+typedNativeModule :: forall terms names var term.
+                ToHomogeneousRow names term terms
+             => Ord var
+             => Binding var
+             => NativeModule names term
+             -> TypedModule terms
+typedNativeModule = fromHomogeneous
 

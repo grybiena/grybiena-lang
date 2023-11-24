@@ -4,13 +4,25 @@ module Language.Lambda.Reduction where
 
 import Prelude
 
+import Control.Monad.Error.Class (class MonadThrow)
+import Control.Monad.Rec.Class (class MonadRec)
+import Control.Monad.State (class MonadState)
+import Data.Foldable (class Foldable)
+import Data.Homogeneous.Record (fromHomogeneous)
 import Data.Traversable (class Traversable, traverse)
-import Language.Lambda.Calculus (LambdaF(..), abs, app, cat, freeIn, var)
+import Language.Kernel.Basis (basis)
+import Language.Lambda.Calculus (class Shadow, LambdaF(..), abs, app, cat, freeIn, var)
 import Language.Lambda.Inference (class IsType)
+import Language.Lambda.Unification (class Fresh, TypingContext)
+import Language.Native (class NativeValue, native)
+import Language.Native.Unsafe (unsafeModule)
+import Language.Parser.Class (class StringParserT, class TypeParser)
 import Matryoshka.Algebra (AlgebraM)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Fold (cataM)
+import Parsing (ParseError)
+import Type.Proxy (Proxy)
 
 class Composition f var cat m where 
   composition :: f (LambdaF var cat)
@@ -47,47 +59,67 @@ reduceLambda =
     Cat c -> reduction c
 
 -- TODO extend to reduce to C and B combinators 
-elimAbs :: forall f var cat m.
+elimAbs :: forall f var cat t m.
           Recursive (f (LambdaF var cat)) (LambdaF var cat) 
        => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
        => Ord var
        => Traversable cat
        => Functor cat
-       => Basis cat (f (LambdaF var cat)) m
+       => Basis t m f var cat
        => Monad m
        => IsType (f (LambdaF var cat))
        => Eq (f (LambdaF var cat))
-       => f (LambdaF var cat)
+       => Proxy t
+       -> f (LambdaF var cat)
        -> m (f (LambdaF var cat))
-elimAbs lam = 
+elimAbs p lam = 
   case project lam of
     Var v -> pure (var v)
 --    App a b | isType b -> elimAbs a -- TODO let's do elimAbs over the Cofree typing of the lambda
                                        -- so we can ask isType of the type
-    App a b -> app <$> elimAbs a <*> elimAbs b
+    App a b -> app <$> elimAbs p a <*> elimAbs p b
     Abs x e ->
       case project e of
-        Var v | v == x -> cat <$> basisI
-        Abs _ f | x `freeIn` f -> abs x <$> elimAbs e
+        Var v | v == x -> basisI p
+        Abs _ f | x `freeIn` f -> abs x <$> elimAbs p e
         -- eta reduce
-        App a b | b == var x -> elimAbs a
+        App a b | b == var x -> elimAbs p a
         App a b | x `freeIn` e -> do
-                s <- cat <$> basisS
-                f <- app s <$> (elimAbs (abs x a))
-                app f <$> (elimAbs (abs x b))
+                s <- basisS p
+                f <- app s <$> (elimAbs p (abs x a))
+                app f <$> (elimAbs p (abs x b))
 
-        Cat _ | x `freeIn` e -> abs x <$> elimAbs e
+        Cat _ | x `freeIn` e -> abs x <$> elimAbs p e
 
         -- T[\x.E] => (K T[E]) (when x does not occur free in E) 
         _ -> do
-           k <- cat <$> basisK
-           app k <$> (elimAbs e)
-    Cat c -> cat <$> (traverse elimAbs c)
+           k <- basisK p
+           app k <$> (elimAbs p e)
+    Cat c -> cat <$> (traverse (elimAbs p) c)
 
-class Basis :: forall k1 k2. (k1 -> k2) -> k1 -> (k2 -> Type) -> Constraint
-class Basis cat term m where
-  basisS :: m (cat term) 
-  basisK :: m (cat term)
-  basisI :: m (cat term)
+
+class (Monad (t m), Monad m) <= Basis t m f var cat where
+  basisS :: Proxy t -> m (f (LambdaF var cat)) 
+  basisK :: Proxy t -> m (f (LambdaF var cat)) 
+  basisI :: Proxy t -> m (f (LambdaF var cat)) 
+
+instance
+  ( MonadRec m
+  , MonadThrow ParseError m
+  , MonadState (TypingContext var f var cat) m
+  , NativeValue f var cat
+  , Fresh var m
+  , Ord var
+  , Shadow var
+  , Foldable cat
+  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
+  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+  , TypeParser t m f var cat
+  , StringParserT t m
+  ) => Basis t m f var cat where
+  basisS p = native <$> (fromHomogeneous (unsafeModule p basis))."S"
+  basisK p = native <$> (fromHomogeneous (unsafeModule p basis))."K"
+  basisI p = native <$> (fromHomogeneous (unsafeModule p basis))."I"
+
 
 
