@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Monad.Error.Class (class MonadThrow, throwError)
+import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate)
 import Data.Eq (class Eq1)
@@ -308,6 +309,7 @@ instance
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , MonadThrow (UnificationError n) m
+  , MonadRec m
   ) => Reduction Mu Var TT m where
   reduction =
     case _ of
@@ -315,6 +317,7 @@ instance
          -- TODO desugar recursive block to a linear sequence of lets using fix
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
-         pure $ foldr (uncurry inline) bo (recSeq bi)
+         bz <- recSeq bi
+         pure $ foldr (uncurry inline) bo bz 
       c -> pure $ cat c
 

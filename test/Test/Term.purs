@@ -250,6 +250,12 @@ termTests = runTest do
     testCompileEval "(\\x -> if x then 1 else 0) true" (Assert.equal 1)
     testCompileEval "(\\x -> if x then 1 else 0) false" (Assert.equal 0)
 
+    testCompileEval "(\\x -> if intGt x 0 then 1 else 0) 5" (Assert.equal 1)
+    testCompileEval "(\\x -> if intGt x 0 then 1 else 0) (-5)" (Assert.equal 0)
+
+-- TODO rewrite f using fix
+--    testCompileEval "(\\x -> let { f = \\a -> if intGt a 0 then f (intPlus a (-1)) else x } in f x) 1" (Assert.equal 0)
+
 
 
 
