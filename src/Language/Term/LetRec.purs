@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRec, tailRecM)
 import Data.Foldable (class Foldable, fold, foldr, null)
-import Data.List (List(..), concat, elem, head, partition, (:))
+import Data.List (List(..), concat, elem, fromFoldable, head, partition, (:))
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
@@ -55,11 +55,6 @@ recSeq x = tailRecM go (Nil /\ x)
 -- 2. fix purely self recursive
 -- 3. fix mutually recursive via graph traversal
 
-type Vertex f var cat =
-  { boundAs :: var
-  , term :: f (LambdaF var cat)
-  , refersTo :: Set var
-  }
 
 newtype Block f var cat = Block (Map var (f (LambdaF var cat)))
 
@@ -111,7 +106,16 @@ instance Ord var => Pointed (Edges var) var where
   points (Edges e) = fold (points <$> e)
 
 instance Ord var => Pointed (Graph var) var where
-  points = points <<< edges
+  points (Graph g) = Points (Map.keys g <> fold (Map.values g))
+
+class Invert a where
+  invert :: a -> a
+
+instance Invert (Edge var) where
+  invert (Edge (a /\ b)) = Edge (b /\ a)
+
+instance Invert (Edges var) where
+  invert (Edges es) = Edges (invert <$> es)
 
 
 class Intersects a b where
@@ -126,6 +130,7 @@ instance (Pointed a var, Pointed b var, Ord var) => Intersects a b where
 
 
 -- TODO topological sort, Tarjan's SCC algorithm 
+
   
 class Components g where
   components :: g -> List g
@@ -136,17 +141,21 @@ instance
   , Recursive (f (LambdaF var cat)) (LambdaF var cat)
   ) => Components (Block f var cat) where
   components g@(Block m) =
-    let es :: List (Edges _)
-        es = components $ edges $ graph g
-        f (Points p) = Block $ Map.filterKeys (\k -> k `elem` p) m
-     in f <$> (points <$> es)
+    let subblock :: Points var -> Block f var cat
+        subblock (Points p) = Block $ Map.filterKeys (\k -> k `elem` p) m
+     in subblock <$> (points <$> (components $ graph g))
 
 instance Ord var => Components (Graph var) where
   components g@(Graph m) =
-    let es :: List (Edges _)
-        es = components $ edges g
-        f (Points p) = Graph $ Map.filterKeys (\k -> k `elem` p) m
-     in f <$> (points <$> es)
+    let componentPoints :: List (Points _)
+        componentPoints = points <$> (components $ edges g)
+        singletons :: Set var
+        singletons = (Map.keys m) `Set.difference` (let Points q = fold componentPoints in q) 
+        singletonPoints :: List (Points _)
+        singletonPoints = Points <<< Set.singleton <$> fromFoldable singletons
+        subgraph :: Points var -> Graph var
+        subgraph (Points p) = Graph $ Map.filterKeys (\k -> k `elem` p) m
+     in subgraph <$> (singletonPoints <> componentPoints) 
 
 instance Ord var => Components (Edges var) where
   components e = tailRec findComponents (Nil /\ e) 
