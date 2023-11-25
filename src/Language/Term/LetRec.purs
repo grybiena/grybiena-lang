@@ -101,16 +101,16 @@ edges (Graph g) =
       pair (v /\ rs) = Edge <<< Tuple v <$> rs
    in Edges (join (pair <$> squash))
 
-class Pointed f where
-  points :: forall a. Ord a => f a -> Points a 
+class Pointed f var | f -> var where
+  points :: f -> Points var 
 
-instance Pointed Edge where
+instance Ord var => Pointed (Edge var) var where
   points (Edge (a /\ b)) = Points $ Set.insert a (Set.singleton b)
 
-instance Pointed Edges where
+instance Ord var => Pointed (Edges var) var where
   points (Edges e) = fold (points <$> e)
 
-instance Pointed Graph where
+instance Ord var => Pointed (Graph var) var where
   points = points <<< edges
 
 
@@ -121,18 +121,34 @@ class Intersects a b where
 instance Ord var => Intersects (Points var) (Points var) where
   intersects (Points a) (Points b) = not $ null $ Set.intersection a b
 else
-instance (Pointed a, Pointed b, Ord var) => Intersects (a var) (b var) where
+instance (Pointed a var, Pointed b var, Ord var) => Intersects a b where
   intersects a b = intersects (points a) (points b) 
 
 
- 
+-- TODO topological sort, Tarjan's SCC algorithm 
   
-class Components f where
-  components :: forall var. Ord var => f var -> List (f var)
+class Components g where
+  components :: g -> List g
 
+instance
+  ( Ord var
+  , Foldable cat
+  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
+  ) => Components (Block f var cat) where
+  components g@(Block m) =
+    let es :: List (Edges _)
+        es = components $ edges $ graph g
+        f (Points p) = Block $ Map.filterKeys (\k -> k `elem` p) m
+     in f <$> (points <$> es)
 
+instance Ord var => Components (Graph var) where
+  components g@(Graph m) =
+    let es :: List (Edges _)
+        es = components $ edges g
+        f (Points p) = Graph $ Map.filterKeys (\k -> k `elem` p) m
+     in f <$> (points <$> es)
 
-instance Components Edges where
+instance Ord var => Components (Edges var) where
   components e = tailRec findComponents (Nil /\ e) 
     where
       findComponents :: (List (Edges _) /\ Edges _) -> Step (List (Edges _) /\ Edges _) (List (Edges _))
