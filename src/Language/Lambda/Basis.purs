@@ -25,6 +25,9 @@ class (Monad (t m), Monad m) <= Basis t m f var cat where
   basisS :: Proxy t -> m (f (LambdaF var cat)) 
   basisK :: Proxy t -> m (f (LambdaF var cat)) 
   basisI :: Proxy t -> m (f (LambdaF var cat)) 
+  basisC :: Proxy t -> m (f (LambdaF var cat)) 
+  basisB :: Proxy t -> m (f (LambdaF var cat)) 
+
 
 instance
   ( MonadRec m
@@ -43,6 +46,9 @@ instance
   basisS p = native <$> (fromHomogeneous (unsafeModule p basis))."S"
   basisK p = native <$> (fromHomogeneous (unsafeModule p basis))."K"
   basisI p = native <$> (fromHomogeneous (unsafeModule p basis))."I"
+  basisC p = native <$> (fromHomogeneous (unsafeModule p basis))."C"
+  basisB p = native <$> (fromHomogeneous (unsafeModule p basis))."B"
+
 
 
 

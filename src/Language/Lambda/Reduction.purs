@@ -5,7 +5,7 @@ module Language.Lambda.Reduction where
 import Prelude
 
 import Data.Traversable (class Traversable, traverse)
-import Language.Lambda.Basis (class Basis, basisI, basisK, basisS)
+import Language.Lambda.Basis (class Basis, basisB, basisC, basisI, basisK, basisS)
 import Language.Lambda.Calculus (LambdaF(..), abs, app, cat, freeIn, var)
 import Language.Lambda.Inference (class IsType)
 import Matryoshka.Algebra (AlgebraM)
@@ -48,7 +48,7 @@ reduceLambda =
     App a b -> composition a b
     Cat c -> reduction c
 
--- TODO extend to reduce to C and B combinators 
+-- Annotated with rules described here https://en.wikipedia.org/wiki/Combinatory_logic#Combinators_B,_C
 elimAbs :: forall f var cat t m.
           Recursive (f (LambdaF var cat)) (LambdaF var cat) 
        => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
@@ -64,24 +64,35 @@ elimAbs :: forall f var cat t m.
        -> m (f (LambdaF var cat))
 elimAbs p lam = 
   case project lam of
+    -- 1. T[x] ⇒ x
     Var v -> pure (var v)
---    App a b | isType b -> elimAbs a -- TODO let's do elimAbs over the Cofree typing of the lambda
-                                       -- so we can ask isType of the type
+    -- 2. T[(E₁ E₂)] ⇒ (T[E₁] T[E₂])
     App a b -> app <$> elimAbs p a <*> elimAbs p b
     Abs x e ->
       case project e of
+        -- 4. T[λx.x] ⇒ I
         Var v | v == x -> basisI p
+        -- 5. T[λx.λy.E] ⇒ T[λx.T[λy.E]] (if x is free in E)
         Abs _ f | x `freeIn` f -> abs x <$> elimAbs p e
-        -- eta reduce
+        -- eta reduction
         App a b | b == var x -> elimAbs p a
-        App a b | x `freeIn` e -> do
+        -- 6. T[λx.(E₁ E₂)] ⇒ (S T[λx.E₁] T[λx.E₂]) (if x is free in both E₁ and E₂)
+        App e1 e2 | x `freeIn` e1 && x `freeIn` e2 -> do
                 s <- basisS p
-                f <- app s <$> (elimAbs p (abs x a))
-                app f <$> (elimAbs p (abs x b))
-
+                f <- app s <$> (elimAbs p (abs x e1))
+                app f <$> (elimAbs p (abs x e2))
+        -- 7. T[λx.(E₁ E₂)] ⇒ (C T[λx.E₁] T[E₂]) (if x is free in E₁ but not E₂)
+        App e1 e2 | x `freeIn` e1 -> do
+                c <- basisC p
+                f <- app c <$> (elimAbs p (abs x e1))
+                app f <$> (elimAbs p e2)
+        -- 8. T[λx.(E₁ E₂)] ⇒ (B T[E₁] T[λx.E₂]) (if x is free in E₂ but not E₁)
+        App e1 e2 | x `freeIn` e2 -> do
+                b <- basisB p
+                f <- app b <$> (elimAbs p e1)
+                app f <$> (elimAbs p (abs x e2))
         Cat _ | x `freeIn` e -> abs x <$> elimAbs p e
-
-        -- T[\x.E] => (K T[E]) (when x does not occur free in E) 
+        -- 3. T[λx.E] ⇒ (K T[E]) (if x is not free in E)
         _ -> do
            k <- basisK p
            app k <$> (elimAbs p e)

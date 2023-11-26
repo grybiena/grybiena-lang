@@ -134,7 +134,7 @@ termTests = runTest do
 
     -- K
     testInferType "\\x y -> y x" "(t1 -> ((t1 -> t4) -> t4))"
-    testInferSkiType "\\x y -> y x" "(t13 -> ((t13 -> t6) -> t6))"
+    testInferSkiType "\\x y -> y x" "(t9 -> ((t9 -> t6) -> t6))"
 
     -- S
     testInferType "\\x y z -> (x z) (y z)" "((t3 -> (t7 -> t9)) -> ((t3 -> t7) -> (t3 -> t9)))"
