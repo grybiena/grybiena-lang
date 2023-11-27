@@ -38,30 +38,42 @@ initialSCCState =
   , components       : mempty
   }
 
+
+initVertex :: forall v. Ord v => SCCState v -> v -> SCCState v
+initVertex st v =
+  st { indexMap = Map.insert v st.index st.indexMap
+     , lowlinkMap = Map.insert v st.index st.lowlinkMap
+     , index = st.index + 1
+     , path = v:st.path
+     }
+
+onSuccessors :: forall v. Ord v => List (Edge v) -> SCCState v -> v -> (SCCState v -> v -> SCCState v) -> SCCState v
+onSuccessors es st v f = foldl (\st' (Edge (v' /\ w)) -> if v == v' then f st' w else st') st es
+
+
 scc' :: forall v. Ord v => List (Edge v) -> SCCState v -> v -> SCCState v
-scc' es sccst iv | Map.lookup iv sccst.indexMap == Nothing = 
+scc' es sccst v | Map.lookup v sccst.indexMap == Nothing = 
   let indexOf   st' v' = Map.lookup v' st'.indexMap
       lowlinkOf st' v' = Map.lookup v' st'.lowlinkMap
 
-      st1 = sccst { indexMap         = Map.insert iv sccst.index sccst.indexMap
-               , lowlinkMap       = Map.insert iv sccst.index sccst.lowlinkMap
-               , index            = sccst.index + 1 
-               , path             = iv : sccst.path
-               }
+      st1 = initVertex sccst v 
 
-      st2 = foldl (\st (Edge (v /\ w)) ->
-             case indexOf st w of
-               Nothing -> let st' = scc' es st w in
-                          case min <$> lowlinkOf st' v <*> lowlinkOf st' w of
-                            Just min -> st' { lowlinkMap = Map.insert v min st'.lowlinkMap }
-                            _ -> st'
-               _ -> case w `elem` st.path of
-                 true -> case min <$> lowlinkOf st v <*> indexOf st w of
-                   Just min -> st { lowlinkMap = Map.insert v min st.lowlinkMap }
-                   _ -> st
-                 false -> st) st1 es
-   in if st2 `indexOf` iv == st2 `lowlinkOf` iv
-        then let newPath = popUntil iv st2.path Nil
+      st2 = onSuccessors es st1 v (\st w ->
+              case indexOf st w of
+                Nothing ->
+                  let st' = scc' es st w
+                   in case min <$> lowlinkOf st' v <*> lowlinkOf st' w of
+                        Just min -> st' { lowlinkMap = Map.insert v min st'.lowlinkMap }
+                        _ -> st'
+                _ ->
+                  if w `elem` st.path
+                    then case min <$> lowlinkOf st v <*> indexOf st w of
+                           Just min -> st { lowlinkMap = Map.insert v min st.lowlinkMap }
+                           _ -> st
+                    else st
+                )
+   in if st2 `indexOf` v == st2 `lowlinkOf` v
+        then let newPath = popUntil v st2.path Nil
                in st2 { components = newPath.component : st2.components
                       , path = newPath.path
                       }
