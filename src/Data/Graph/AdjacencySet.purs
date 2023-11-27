@@ -14,7 +14,7 @@ import Data.Relation.Invert (class Invert, invert)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Topos.Pointed (class Pointed)
-import Data.Topos.Pointed.Partition (class Partition, CC(..), partition)
+import Data.Topos.Pointed.Projection (class Projection, CC(..), projection)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
 
@@ -44,20 +44,20 @@ instance Ord v => Invert (Graph v) where
         EdgeList.Graph i = invert $ edgeList g
      in Graph (foldr addEdge ((const Set.empty) <$> m) i)
 
-instance Ord v => Partition CC (Graph v) (Set v) where
-  partition (CC g@(Graph m)) =
-    let connected = partition (CC (edgeList g))
+instance Ord v => Projection CC (Graph v) (Set v) where
+  projection (CC g@(Graph m)) =
+    let connected = projection (CC (edgeList g))
         singletons :: Set v
         singletons = Map.keys m `Set.difference` fold connected
         singletonPoints :: List (Set v)
         singletonPoints = Set.singleton <$> fromFoldable singletons
      in (singletonPoints <> connected) 
 
-instance Ord v => Partition CC (Graph v) (Graph v) where
-  partition (CC g@(Graph m)) =
+instance Ord v => Projection CC (Graph v) (Graph v) where
+  projection (CC g@(Graph m)) =
     let subgraph :: Set v -> Graph v
         subgraph p = Graph $ Map.filterKeys (\k -> k `elem` p) m
-        cc = partition (CC g)
+        cc = projection (CC g)
      in subgraph <$> cc 
 
 

@@ -7,7 +7,7 @@ import Data.Graph.EdgeList as EdgeList
 import Data.List (List, fromFoldable)
 import Data.Set (Set)
 import Data.Set as Set
-import Data.Topos.Pointed.Partition (CC(..), partition)
+import Data.Topos.Pointed.Projection (CC(..), projection)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Test.Unit (TestSuite, suite, test)
@@ -21,7 +21,7 @@ testComponents = test "components" $ do
       g :: EdgeList.Graph Int
       g = EdgeList.Graph $ fromFoldable e
       cc :: List (Set Int)
-      cc = partition (CC g)
+      cc = projection (CC g)
       expected :: List (Set Int)
       expected = fromFoldable [Set.fromFoldable [8,9,10], Set.fromFoldable [1,2,3,5,6,7]]
   Assert.equal expected cc
