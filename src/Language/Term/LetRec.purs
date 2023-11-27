@@ -2,15 +2,13 @@ module Language.Term.LetRec where
 
 import Prelude
 
-import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRec, tailRecM)
-import Data.Foldable (class Foldable, fold, foldr, null)
-import Data.List (List(..), concat, elem, fromFoldable, head, partition, (:))
+import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
+import Data.Foldable (class Foldable)
+import Data.List (List(..), elem)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
 import Data.Set (Set)
 import Data.Set as Set
-import Data.Tuple (Tuple(..), uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (LambdaF, free)
 import Matryoshka (class Recursive)
@@ -51,136 +49,4 @@ recSeq x = tailRecM go (Nil /\ x)
               pure $ Loop ((bou <> independents) /\ dependents)
             else pure $ Done (bou <> independents)
 
--- 1. pull out non-recursive
--- 2. fix purely self recursive
--- 3. fix mutually recursive via graph traversal
-
-
-newtype Block f var cat = Block (Map var (f (LambdaF var cat)))
-
-newtype Graph var = Graph (Map var (Set var))
-
-newtype Edge var = Edge (var /\ var)
-derive newtype instance Eq var => Eq (Edge var)
-derive newtype instance Show var => Show (Edge var)
-
-newtype Edges var = Edges (List (Edge var))
-derive newtype instance Eq var => Eq (Edges var)
-derive newtype instance Show var => Show (Edges var)
-derive newtype instance Semigroup (Edges var)
-derive newtype instance Monoid (Edges var)
-
-
-newtype Points var = Points (Set var)
-derive newtype instance Eq var => Eq (Points var)
-derive newtype instance Show var => Show (Points var)
-derive newtype instance Ord var => Semigroup (Points var)
-derive newtype instance Ord var => Monoid (Points var)
-derive newtype instance Foldable Points
-
-bound :: forall f var cat. Block f var cat -> Set var 
-bound (Block b) = Map.keys b
-
-graph :: forall f var cat.
-         Ord var
-      => Foldable cat
-      => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-      => Block f var cat -> Graph var 
-graph block@(Block b) = Graph ((Set.filter (flip elem (bound block)) <<< free) <$> b)
-
-edges :: forall var. Graph var -> Edges var
-edges (Graph g) =
-  let squash :: List (var /\ List var)
-      squash = map Set.toUnfoldable <$> Map.toUnfoldable g
-      pair :: (var /\ List var) -> List (Edge var)
-      pair (v /\ rs) = Edge <<< Tuple v <$> rs
-   in Edges (join (pair <$> squash))
-
-class Pointed f var | f -> var where
-  points :: f -> Points var 
-
-instance Ord var => Pointed (Edge var) var where
-  points (Edge (a /\ b)) = Points $ Set.insert a (Set.singleton b)
-
-instance Ord var => Pointed (Edges var) var where
-  points (Edges e) = fold (points <$> e)
-
-instance Ord var => Pointed (Graph var) var where
-  points (Graph g) = Points (Map.keys g <> fold (Map.values g))
-
-class Invert a where
-  invert :: a -> a
-
-instance Invert (Edge var) where
-  invert (Edge (a /\ b)) = Edge (b /\ a)
-
-instance Invert (Edges var) where
-  invert (Edges es) = Edges (invert <$> es)
-
-
-class Intersects a b where
-  intersects :: a -> b -> Boolean
-
-
-instance Ord var => Intersects (Points var) (Points var) where
-  intersects (Points a) (Points b) = not $ null $ Set.intersection a b
-else
-instance (Pointed a var, Pointed b var, Ord var) => Intersects a b where
-  intersects a b = intersects (points a) (points b) 
-
-
--- TODO topological sort, Tarjan's SCC algorithm 
-
-  
-class Components g where
-  components :: g -> List g
-
-instance
-  ( Ord var
-  , Foldable cat
-  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
-  ) => Components (Block f var cat) where
-  components g@(Block m) =
-    let subblock :: Points var -> Block f var cat
-        subblock (Points p) = Block $ Map.filterKeys (\k -> k `elem` p) m
-     in subblock <$> (points <$> (components $ graph g))
-
-instance Ord var => Components (Graph var) where
-  components g@(Graph m) =
-    let componentPoints :: List (Points _)
-        componentPoints = points <$> (components $ edges g)
-        singletons :: Set var
-        singletons = (Map.keys m) `Set.difference` (let Points q = fold componentPoints in q) 
-        singletonPoints :: List (Points _)
-        singletonPoints = Points <<< Set.singleton <$> fromFoldable singletons
-        subgraph :: Points var -> Graph var
-        subgraph (Points p) = Graph $ Map.filterKeys (\k -> k `elem` p) m
-     in subgraph <$> (singletonPoints <> componentPoints) 
-
-instance Ord var => Components (Edges var) where
-  components e = tailRec findComponents (Nil /\ e) 
-    where
-      findComponents :: (List (Edges _) /\ Edges _) -> Step (List (Edges _) /\ Edges _) (List (Edges _))
-      findComponents (d /\ t) =
-        case saturateFirst t of
-          (f /\ Edges Nil) -> Done (f:d)
-          (f /\ g) -> Loop ((f:d) /\ g)
-  
-        where
-          saturateFirst :: Edges _ -> (Edges _/\ Edges _)
-          saturateFirst = tailRec saturate <<< groupFirst 
-            where
-              saturate :: (Edges _/\ Edges _) -> Step (Edges _ /\ Edges _) (Edges _ /\ Edges _)
-              saturate x@(_ /\ Edges Nil) = Done x
-              saturate (f /\ Edges r) =
-                let { yes, no } = partition (intersects f) r
-                  in if r == no
-                       then Done ((f <> Edges yes) /\ Edges no)
-                       else Loop ((f <> Edges yes) /\ Edges no)
            
-              groupFirst :: Edges _ -> (Edges _ /\ Edges _)
-              groupFirst (Edges Nil) = Edges Nil /\ Edges Nil 
-              groupFirst (Edges (a:r)) =
-                let { yes, no } = partition (intersects a) r
-                  in Edges (a:yes) /\ Edges no
-            

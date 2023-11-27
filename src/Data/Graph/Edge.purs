@@ -4,9 +4,7 @@ import Prelude
 
 import Data.Relation.Invert (class Invert)
 import Data.Set as Set
-import Data.Topos.Components (class Components)
-import Data.Topos.Pointed (class Pointed, points)
-import Data.Topos.Pointed.Partition (class Partition)
+import Data.Topos.Pointed (class Pointed)
 import Data.Tuple.Nested (type (/\), (/\))
 
 newtype Edge v = Edge (v /\ v)
@@ -19,9 +17,4 @@ instance Ord v => Pointed (Edge v) v where
 instance Invert (Edge v) where
   invert (Edge (a /\ b)) = Edge (b /\ a)
 
-instance Ord v => Partition (Edge v) v where
-  partition = pure <<< points
-
-instance Ord v => Components (Edge v) where
-  components = pure
 

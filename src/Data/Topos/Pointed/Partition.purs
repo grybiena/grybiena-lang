@@ -1,9 +1,14 @@
 module Data.Topos.Pointed.Partition where
 
 import Data.List (List)
-import Data.Set (Set)
-
  
-class Partition g o where
-  partition :: g -> List (Set o)
+
+class Partition :: (Type -> Type) -> Type -> Type -> Constraint
+class Partition f g o where
+  partition :: f g -> List o
+
+
+newtype CC o = CC o
+
+newtype SCC o = SCC o 
 
