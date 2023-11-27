@@ -9,6 +9,7 @@ import Data.Graph.SCC (scc)
 import Data.List (List, filter)
 import Data.Relation.Invert (class Invert, invert)
 import Data.Set (Set)
+import Data.Set as Set
 import Data.Topos.Intersects (intersects)
 import Data.Topos.Pointed (class Pointed, points)
 import Data.Topos.Pointed.Projection (class Projection, CC(..), SCC(..), projection)
@@ -29,18 +30,21 @@ instance Invert (Graph v) where
   invert (Graph es) = Graph (invert <$> es)
 
 instance Ord v => Projection CC (Graph v) (Set v) where
-  projection (CC g) = map points (projection (CC g) :: List (Graph v))
+  projection g = map points (projection g :: CC (Graph v))
 
 instance Ord v => Projection CC (Graph v) (Graph v) where
-  projection (CC (Graph es)) = Graph <$> (cc es)
+  projection (Graph es) = CC $ Graph <$> (cc es)
+
+instance Ord v => Projection SCC (Graph v) (List v) where
+  projection (Graph es) = SCC (scc es)
 
 instance Ord v => Projection SCC (Graph v) (Set v) where
-  projection (SCC (Graph es)) = (scc es)
+  projection g = Set.fromFoldable <$> (projection g :: SCC (List v))
 
 instance Ord v => Projection SCC (Graph v) (Graph v) where
-  projection (SCC g@(Graph es)) =
-    let pts :: List (Set v)
-        pts = projection (SCC g)
+  projection g@(Graph es) =
+    let SCC pts = projection g
         pick :: List (Edge v) -> Set v -> List (Edge v)
         pick l s = filter (intersects s <<< points) l
-     in Graph <$> (pick es <$> pts) 
+     in SCC $ Graph <$> (pick es <$> pts) 
+

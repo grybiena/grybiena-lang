@@ -14,7 +14,7 @@ import Data.Relation.Invert (class Invert, invert)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Topos.Pointed (class Pointed)
-import Data.Topos.Pointed.Projection (class Projection, CC(..), projection)
+import Data.Topos.Pointed.Projection (class Projection, CC(..), SCC(..), projection)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
 
@@ -45,19 +45,39 @@ instance Ord v => Invert (Graph v) where
      in Graph (foldr addEdge ((const Set.empty) <$> m) i)
 
 instance Ord v => Projection CC (Graph v) (Set v) where
-  projection (CC g@(Graph m)) =
-    let connected = projection (CC (edgeList g))
+  projection g@(Graph m) =
+    let connected :: CC (Set v)
+        connected = projection (edgeList g)
         singletons :: Set v
         singletons = Map.keys m `Set.difference` fold connected
         singletonPoints :: List (Set v)
         singletonPoints = Set.singleton <$> fromFoldable singletons
-     in (singletonPoints <> connected) 
+     in (CC singletonPoints <> connected) 
 
 instance Ord v => Projection CC (Graph v) (Graph v) where
-  projection (CC g@(Graph m)) =
+  projection g@(Graph m) =
     let subgraph :: Set v -> Graph v
         subgraph p = Graph $ Map.filterKeys (\k -> k `elem` p) m
-        cc = projection (CC g)
+        cc :: CC (Set v)
+        cc = projection g
+     in subgraph <$> cc 
+
+instance Ord v => Projection SCC (Graph v) (Set v) where
+  projection g@(Graph m) = 
+    let connected :: SCC (Set v)
+        connected = projection (edgeList g)
+        singletons :: Set v
+        singletons = Map.keys m `Set.difference` fold connected
+        singletonPoints :: List (Set v)
+        singletonPoints = Set.singleton <$> fromFoldable singletons
+     in (SCC singletonPoints <> connected) 
+
+instance Ord v => Projection SCC (Graph v) (Graph v) where
+  projection g@(Graph m) =
+    let subgraph :: Set v -> Graph v
+        subgraph p = Graph $ Map.filterKeys (\k -> k `elem` p) m
+        cc :: SCC (Set v)
+        cc = projection g
      in subgraph <$> cc 
 
 

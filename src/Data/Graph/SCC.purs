@@ -11,8 +11,6 @@ import Data.List (List(..), fold, (:))
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
-import Data.Set (Set)
-import Data.Set as Set
 import Data.Topos.Pointed (points)
 import Data.Tuple.Nested ((/\))
 
@@ -26,10 +24,10 @@ type SCCState v =
   , components       :: List (List v)
   }
 
-scc :: forall v. Ord v => List (Edge v) -> List (Set v)
+scc :: forall v. Ord v => List (Edge v) -> List (List v)
 scc g = 
   let st = foldl (scc' g) initialSCCState (fold (points <$> g))
-  in Set.fromFoldable <$> st.components
+  in st.components
 
 initialSCCState :: forall v. SCCState v
 initialSCCState =
