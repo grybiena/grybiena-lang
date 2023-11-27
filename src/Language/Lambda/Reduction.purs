@@ -74,7 +74,7 @@ elimAbs p lam =
         Var v | v == x -> basisI p
         -- 5. T[λx.λy.E] ⇒ T[λx.T[λy.E]] (if x is free in E)
         Abs _ f | x `freeIn` f -> abs x <$> elimAbs p e
-        -- eta reduction
+        -- eta reduction. T[λx.a x] ⇒ T[a]
         App a b | b == var x -> elimAbs p a
         -- 6. T[λx.(E₁ E₂)] ⇒ (S T[λx.E₁] T[λx.E₂]) (if x is free in both E₁ and E₂)
         App e1 e2 | x `freeIn` e1 && x `freeIn` e2 -> do
@@ -91,6 +91,7 @@ elimAbs p lam =
                 b <- basisB p
                 f <- app b <$> (elimAbs p e1)
                 app f <$> (elimAbs p (abs x e2))
+        -- cat reduction.  T[λx. o] ⇒ λx.T[o]
         Cat _ | x `freeIn` e -> abs x <$> elimAbs p e
         -- 3. T[λx.E] ⇒ (K T[E]) (if x is not free in E)
         _ -> do
