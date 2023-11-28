@@ -4,7 +4,7 @@ import Prelude
 
 import Data.Graph.Edge (Edge(..))
 import Data.Graph.EdgeList as EdgeList
-import Data.List (fromFoldable)
+import Data.List (List, fromFoldable)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Topos.Pointed.Projection (CC(..), SCC(..), projection)
@@ -33,10 +33,10 @@ testSCC = test "scc" $ do
       e = Edge <$> [(1 /\ 2), (2 /\ 3), (3 /\ 1), (5 /\ 6), (6 /\ 7), (7 /\ 5),(2 /\ 7)] 
       g :: EdgeList.Graph Int
       g = EdgeList.Graph $ fromFoldable e
-      cc :: SCC (Set Int)
+      cc :: SCC (List Int)
       cc = projection g
-      expected :: SCC (Set Int)
-      expected = SCC $ fromFoldable [Set.fromFoldable [1,2,3], Set.fromFoldable [5,6,7]]
+      expected :: SCC (List Int)
+      expected = SCC $ fromFoldable [fromFoldable [1,2,3], fromFoldable [7,5,6]]
 
   Assert.equal expected cc
 
@@ -47,10 +47,10 @@ testSCCBroken = test "sccBroken" $ do
       e = Edge <$> [(1 /\ 2), (2 /\ 3), (3 /\ 1), (5 /\ 6), (6 /\ 7), (7 /\ 5),(7 /\ 2)] 
       g :: EdgeList.Graph Int
       g = EdgeList.Graph $ fromFoldable e
-      cc :: SCC (Set Int)
+      cc :: SCC (List Int)
       cc = projection g
-      expected :: SCC (Set Int)
-      expected = SCC $ fromFoldable [Set.fromFoldable [5,6,7],Set.fromFoldable [1,2,3]]
+      expected :: SCC (List Int)
+      expected = SCC $ fromFoldable [fromFoldable [5,6,7],fromFoldable [1,2,3]]
 
   Assert.equal expected cc
 

@@ -3,7 +3,9 @@ module Language.Term where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
+import Control.Monad.Cont (lift)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
+import Control.Monad.Except (ExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate)
@@ -22,13 +24,18 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested ((/\))
+import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Console (log)
+import Language.Lambda.Basis (class Basis)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, unifyWithArrow)
 import Language.Lambda.Reduction (class Composition, class Reduction)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class UnificationError, class Unify, Skolem, TypingContext, assume, fresh, fromInt, rewrite, substitute, unificationError, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, rewrite, substitute, unify)
+import Language.Lambda.Unification.Error (class ThrowUnificationError, UnificationError(..), unificationError)
 import Language.Native (class NativeValue, Native(..))
 import Language.Term.LetRec (recSeq)
 import Matryoshka.Class.Recursive (project)
+import Parsing (ParseError(..))
 import Prettier.Printer (stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
 import Prim (Boolean, Int, Number, Record, String)
@@ -169,27 +176,6 @@ instance PrettyLambda Var TT where
 
 
 
-data UnificationError :: forall k. k -> Prim.Type
-data UnificationError m =
-    NotInScope Var
-  | Err String
-  | InvalidApp Term Term
-  | UnificationError Term Term 
-
-derive instance Generic (UnificationError m) _
-
-instance Show (UnificationError m) where
-  show = genericShow
-
-instance Pretty (UnificationError m) where
-  pretty (NotInScope v) = text "Not in scope:" <+> pretty v
-  pretty (Err err) = text "Error:" <+> text err
-  pretty (InvalidApp a b) = text "Invalid app:" <+> pretty a <+> pretty b
-  pretty (UnificationError a b) = text "Unification error:" <+> pretty a <+> text "=?=" <+> pretty b
-
-instance Eq (UnificationError m) where
-  eq = genericEq
-
 instance ArrowObject (TT a) where
   arrowObject = Arrow 
 
@@ -199,18 +185,24 @@ instance Enumerable Ident where
 instance Enumerable Var where
   fromInt = Ident <<< fromInt
 
-instance NotInScopeError Var (UnificationError m) where 
-  notInScopeError = NotInScope
 
-instance InfiniteTypeError Var Term (UnificationError m) where
-  infiniteTypeError v t = Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
+instance Monad m => NotInScopeError Var (ExceptT ParseError (ExceptT (UnificationError Mu Var TT) m)) where 
+  notInScopeError = lift <<< throwError <<< NotInScope
 
-instance UnificationError Term (UnificationError m) where 
-  unificationError = UnificationError 
+instance Monad m => NotInScopeError Var (ExceptT (UnificationError Mu Var TT) m) where 
+  notInScopeError = throwError <<< NotInScope
+
+instance Monad m => InfiniteTypeError Var Term (ExceptT ParseError (ExceptT (UnificationError Mu Var TT) m)) where
+  infiniteTypeError v t = lift $ throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
+
+instance Monad m => InfiniteTypeError Var Term (ExceptT (UnificationError Mu Var TT) m) where
+  infiniteTypeError v t = throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
+
 
 
 instance
-  ( MonadThrow (UnificationError n) m
+  ( ThrowUnificationError Term m
+  , InfiniteTypeError Var Term m
   , Fresh Var m
   , Skolemize Mu Var TT
   , MonadState (TypingContext Var Mu Var TT) m
@@ -222,7 +214,7 @@ instance
   unify v@(Skolemized _ _ i) t =
     case project t of
       Var (Skolemized _ _ j) | i == j -> pure unit
-      Var (Skolemized _ _ _) -> throwError $ unificationError (var v) t
+      Var (Skolemized _ _ _) -> unificationError (var v) t
       -- TODO is substitution always safe?                             
       _ -> substitute v t
 --      _ -> throwError $ unificationError (var v) t
@@ -234,10 +226,11 @@ instance
 
 
 instance
-  ( MonadThrow (UnificationError n) m
-  , Fresh Var m
+  ( Fresh Var m
   , Skolemize Mu Var TT
   , MonadState (TypingContext Var Mu Var TT) m
+  , ThrowUnificationError Term m
+  , InfiniteTypeError Var Term m
   ) => Unify (TT Term) (TT Term) m where
   unify Arrow Arrow = pure unit
   -- TODO cumulativity ~ universe hierarchy
@@ -252,8 +245,8 @@ instance
   unify a@(Native (Purescript na)) b@(Native (Purescript nb)) = do
     unify na.nativeType nb.nativeType
     when (na.nativePretty /= nb.nativePretty) do
-       throwError $ unificationError (cat a) (cat b)
-  unify a b = throwError $ unificationError (cat a) (cat b)
+       unificationError (cat a) (cat b)
+  unify a b = unificationError (cat a) (cat b)
 
  
 
@@ -261,7 +254,9 @@ instance
   ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
-  , MonadThrow (UnificationError n) m
+  , ThrowUnificationError Term m
+  , InfiniteTypeError Var Term m
+  , NotInScopeError Var m
   ) => Inference Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
@@ -284,10 +279,12 @@ instance
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
 instance
-  ( Monad m
+  ( Monad m --Effect m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
-  , MonadThrow (UnificationError n) m
+  , ThrowUnificationError Term m
+  , InfiniteTypeError Var Term m
+  , NotInScopeError Var m
   ) => Composition Mu Var TT m where
   composition a b =
     case project a /\ project b of
@@ -298,8 +295,10 @@ instance
         rewrite a
       Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) -> do
         nativeType <- head <$> infer (app a b)
+        let nativePretty = "(" <> na.nativePretty <> " " <> nb.nativePretty <> ")"
+--        liftEffect $ log $ nativePretty <> " :: " <> prettyPrint nativeType
         pure $ cat (Native (Purescript { nativeType
-                                       , nativePretty: "(" <> na.nativePretty <> " " <> nb.nativePretty <> ")"
+                                       , nativePretty
                                        , nativeTerm: na.nativeTerm nb.nativeTerm
                                        }))
       _ -> pure $ app a b 
@@ -308,16 +307,16 @@ instance
   ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
-  , MonadThrow (UnificationError n) m
+  , Basis t m Mu Var TT 
   , MonadRec m
-  ) => Reduction Mu Var TT m where
-  reduction =
+  ) => Reduction t Mu Var TT m where
+  reduction p =
     case _ of
       LetRec bi bo -> do
          -- TODO desugar recursive block to a linear sequence of lets using fix
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
-         bz <- recSeq bi
+         bz <- recSeq p bi
          pure $ foldr (uncurry inline) bo bz 
       c -> pure $ cat c
 

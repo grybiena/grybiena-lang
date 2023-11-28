@@ -19,34 +19,61 @@ class Composition f var cat m where
           -> f (LambdaF var cat)
           -> m (f (LambdaF var cat))
 
-class Reduction f var cat m where
-  reduction :: cat (f (LambdaF var cat))
+class Reduction :: forall k. k -> ((Type -> Type) -> Type) -> Type -> (Type -> Type) -> (Type -> Type) -> Constraint
+class Reduction t f var cat m where
+  reduction :: Proxy t
+            -> cat (f (LambdaF var cat))
             -> m (f (LambdaF var cat))
  
-reduce :: forall f var cat m.
+composer :: forall t f var cat m.
              Recursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Composition f var cat m
-         => Reduction f var cat m
+         => Reduction t f var cat m
          => Eq (f (LambdaF var cat))
          => Monad m
          => Traversable cat
-         => f (LambdaF var cat) -> m (f (LambdaF var cat))
-reduce = cataM reduceLambda
+         => Proxy t -> f (LambdaF var cat) -> m (f (LambdaF var cat))
+composer p = cataM (composeLambda p)
 
-reduceLambda :: forall f var cat m.
+composeLambda :: forall t f var cat m.
              Recursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Composition f var cat m
-         => Reduction f var cat m
+         => Reduction t f var cat m
          => Applicative m
-         => AlgebraM m (LambdaF var cat) (f (LambdaF var cat))
-reduceLambda =
+         => Proxy t -> AlgebraM m (LambdaF var cat) (f (LambdaF var cat))
+composeLambda _ =
   case _ of
     Var v -> pure $ var v
     Abs x e -> pure $ abs x e
     App a b -> composition a b
-    Cat c -> reduction c
+    Cat c -> pure $ cat c 
+
+reduce :: forall t f var cat m.
+             Recursive (f (LambdaF var cat)) (LambdaF var cat) 
+         => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
+         => Composition f var cat m
+         => Reduction t f var cat m
+         => Eq (f (LambdaF var cat))
+         => Monad m
+         => Traversable cat
+         => Proxy t -> f (LambdaF var cat) -> m (f (LambdaF var cat))
+reduce p = cataM (reduceLambda p)
+
+reduceLambda :: forall t f var cat m.
+             Recursive (f (LambdaF var cat)) (LambdaF var cat) 
+         => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
+         => Composition f var cat m
+         => Reduction t f var cat m
+         => Applicative m
+         => Proxy t -> AlgebraM m (LambdaF var cat) (f (LambdaF var cat))
+reduceLambda p =
+  case _ of
+    Var v -> pure $ var v
+    Abs x e -> pure $ abs x e
+    App a b -> composition a b
+    Cat c -> reduction p c
 
 -- Annotated with rules described here https://en.wikipedia.org/wiki/Combinatory_logic#Combinators_B,_C
 elimAbs :: forall f var cat t m.
@@ -75,7 +102,7 @@ elimAbs p lam =
         -- 5. T[λx.λy.E] ⇒ T[λx.T[λy.E]] (if x is free in E)
         Abs _ f | x `freeIn` f -> abs x <$> elimAbs p e
         -- eta reduction. T[λx.a x] ⇒ T[a]
-        App a b | b == var x -> elimAbs p a
+        App a b | b == var x && (not (x `freeIn` a))-> elimAbs p a
         -- 6. T[λx.(E₁ E₂)] ⇒ (S T[λx.E₁] T[λx.E₂]) (if x is free in both E₁ and E₂)
         App e1 e2 | x `freeIn` e1 && x `freeIn` e2 -> do
                 s <- basisS p

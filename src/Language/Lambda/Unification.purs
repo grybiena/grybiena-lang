@@ -2,8 +2,7 @@ module Language.Lambda.Unification where
 
 import Prelude
 
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
-import Control.Monad.Except.Trans (class MonadThrow)
+import Control.Monad.Except (ExceptT, runExceptT)
 import Control.Monad.State (class MonadState, State, StateT, get, modify, modify_, runState, runStateT)
 import Data.Either (Either)
 import Data.Foldable (class Foldable)
@@ -15,6 +14,7 @@ import Data.Set as Set
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (class Shadow, LambdaF(..), occursIn, replace, replaceFree, shadow, universe, var)
+import Language.Lambda.Unification.Error (class ThrowUnificationError, unificationError)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 
@@ -46,17 +46,14 @@ class Context var typ m | var -> typ where
   assume :: var -> typ -> m Unit
   require :: var -> m typ
 
-class NotInScopeError var err where
-  notInScopeError :: var -> err
+class Monad m <= NotInScopeError var m where
+  notInScopeError :: forall a. var -> m a
  
 class Unify a b m where
   unify :: a -> b-> m Unit
 
-class UnificationError typ err where
-  unificationError :: typ -> typ -> err
-
-class InfiniteTypeError var typ err | typ -> err where
-  infiniteTypeError :: var -> typ -> err
+class Monad m <= InfiniteTypeError var typ m where
+  infiniteTypeError :: forall a. var -> typ -> m a 
 
 newtype Skolem = Skolem Int
 derive newtype instance Show Skolem
@@ -80,9 +77,8 @@ instance
   , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
   , Unify (cat (f (LambdaF var cat))) (cat (f (LambdaF var cat))) m
   , Unify var (f (LambdaF var cat)) m
-  , UnificationError (f (LambdaF var cat)) err
+  , ThrowUnificationError (f (LambdaF var cat)) m
   , Skolemize f var cat
-  , MonadThrow err m
   ) => Unify (f (LambdaF var cat)) (f (LambdaF var cat)) m where
   unify ta tb = do
      case project ta /\ project tb of
@@ -101,7 +97,7 @@ instance
        App ab aa /\ App bb ba -> do
          unify ab bb *> unify aa ba
        Cat ca /\ Cat cb -> unify ca cb
-       _ -> throwError $ unificationError ta tb
+       _ -> unificationError ta tb
 
 
 type TypingContext var f var' cat' =
@@ -154,9 +150,8 @@ instance
 instance
   ( Monad m
   , Ord var
-  , NotInScopeError var err
+  , NotInScopeError var m
   , MonadState (TypingContext var f var' cat') m
-  , MonadThrow err m
   ) => Context var (f (LambdaF var' cat')) m where
   assume v t =
      modify_ (\st -> st {
@@ -166,7 +161,7 @@ instance
     st <- get
     case Map.lookup v st.typingAssumptions of
       Just t -> pure t
-      Nothing -> throwError $ notInScopeError v
+      Nothing -> notInScopeError v
 
 
 instance
@@ -178,16 +173,16 @@ instance
   , MonadState (TypingContext var f var' cat') m
   , Recursive (f (LambdaF var' cat')) (LambdaF var' cat')
   , Corecursive (f (LambdaF var' cat')) (LambdaF var' cat')
-  , InfiniteTypeError var' (f (LambdaF var' cat')) err
+
   , Unify (cat' (f (LambdaF var' cat'))) (cat' (f (LambdaF var' cat'))) m
   , Unify var' (f (LambdaF var' cat')) m
-  , UnificationError (f (LambdaF var' cat')) err
-  , MonadThrow err m
+  , ThrowUnificationError (f (LambdaF var' cat')) m 
+  , InfiniteTypeError var' (f (LambdaF var' cat')) m
   , Shadow var' -- TODO is it safe to only consider shadows?
   ) => Substitute var' cat' f m where
   substitute v t' = do
      t <- rewrite t'
-     when (v `occursIn` t) $ throwError $ infiniteTypeError v t 
+     when (v `occursIn` t) $ infiniteTypeError v t 
      u <- rewrite (var v :: f (LambdaF var' cat'))
      case project u of
         Var v' | v' == v -> pure unit 
