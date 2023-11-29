@@ -22,7 +22,7 @@ import Language.Kernel.Effect (effectNatives)
 import Language.Kernel.Pure (pureModule)
 import Language.Lambda.Calculus (LambdaF(..))
 import Language.Lambda.Inference (infer)
-import Language.Lambda.Reduction (composer, elimAbs, reduce)
+import Language.Lambda.Reduction (elimAbs, reduce)
 import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
 import Language.Lambda.Unification.Error (UnificationError)
 import Language.Native (Native(..))
@@ -426,6 +426,7 @@ termParser s = runStringParserT s do
   v <- (parser someKernel).parseValue
   Parser eof
   pure v
+
 
 
 

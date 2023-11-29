@@ -9,7 +9,7 @@ import Data.Array (intercalate)
 import Data.Array as Array
 import Data.Eq.Generic (genericEq)
 import Data.Generic.Rep (class Generic)
-import Data.Graph.LetRec (LetRec(..))
+import Language.Lambda.Block (Block(..))
 import Data.Map as Map
 import Data.Show.Generic (genericShow)
 import Language.Lambda.Calculus (LambdaF)
@@ -24,7 +24,7 @@ data UnificationError f var cat =
   | InvalidApp (f (LambdaF var cat)) (f (LambdaF var cat)) 
   | UnificationError (f (LambdaF var cat)) (f (LambdaF var cat)) 
   | NativeTypeParseError ParseError
-  | RecursiveBindingError (LetRec f var cat)
+  | RecursiveBlockError (Block f var cat)
 
 derive instance Generic (UnificationError f var cat) _
 
@@ -34,17 +34,17 @@ instance
   ) => Show (UnificationError f var cat) where
   show = genericShow
 
-class Monad m <= ThrowRecursiveBindingError f var cat m where
-  recursiveBindingError :: forall a. LetRec f var cat -> m a
+class Monad m <= ThrowRecursiveBlockError f var cat m where
+  recursiveBlockError :: forall a. Block f var cat -> m a
 
 class Monad m <= ThrowUnificationError typ m where
   unificationError :: forall a. typ -> typ -> m a
 
-instance Monad m => ThrowRecursiveBindingError f var cat (ExceptT ParseError (ExceptT (UnificationError f var cat) m)) where 
-  recursiveBindingError = lift <<< recursiveBindingError
+instance Monad m => ThrowRecursiveBlockError f var cat (ExceptT ParseError (ExceptT (UnificationError f var cat) m)) where 
+  recursiveBlockError = lift <<< recursiveBlockError
 
-instance Monad m => ThrowRecursiveBindingError f var cat (ExceptT (UnificationError f var cat) m) where 
-  recursiveBindingError = throwError <<< RecursiveBindingError
+instance Monad m => ThrowRecursiveBlockError f var cat (ExceptT (UnificationError f var cat) m) where 
+  recursiveBlockError = throwError <<< RecursiveBlockError
 
 
 instance Monad m => ThrowUnificationError (f (LambdaF var cat)) (ExceptT ParseError (ExceptT (UnificationError f var cat) m)) where 
@@ -73,7 +73,7 @@ instance
   pretty (InvalidApp a b) = text "Invalid app:" <+> pretty a <+> pretty b
   pretty (UnificationError a b) = text "Unification error:" <+> pretty a <+> text "=?=" <+> pretty b
   pretty (NativeTypeParseError e) = text "Native type parse error:" <+> text (show e)
-  pretty (RecursiveBindingError (LetRec lr)) =
+  pretty (RecursiveBlockError (Block lr)) =
     text "Recursive bindings are not allowed:" <+> text "[" <> (intercalate (text ",") (pretty <$> (Array.fromFoldable $ Map.keys lr))) <> text "]"
 
 instance

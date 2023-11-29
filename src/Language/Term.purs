@@ -15,7 +15,7 @@ import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable, foldr)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.Graph.LetRec (LetRec(..))
+import Language.Lambda.Block (Block(..), sequenceBindings)
 import Data.List (List)
 import Data.Map (Map)
 import Data.Map as Map
@@ -30,9 +30,8 @@ import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shad
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, unifyWithArrow)
 import Language.Lambda.Reduction (class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, rewrite, substitute, unify)
-import Language.Lambda.Unification.Error (class ThrowRecursiveBindingError, class ThrowUnificationError, UnificationError(..), recursiveBindingError, unificationError)
+import Language.Lambda.Unification.Error (class ThrowRecursiveBlockError, class ThrowUnificationError, UnificationError(..), recursiveBlockError, unificationError)
 import Language.Native (class NativeValue, Native(..))
-import Language.Term.LetRec (recSeq)
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParseError)
 import Prettier.Printer (stack, text, (<+>), (</>))
@@ -306,15 +305,16 @@ instance
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , MonadRec m
-  , ThrowRecursiveBindingError Mu Var TT m
+  , ThrowRecursiveBlockError Mu Var TT m
   ) => Reduction Mu Var TT m where
   reduction =
     case _ of
       Let bi bo -> do
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
-         case recSeq (LetRec bi) of
-           Left err -> recursiveBindingError err
+         case sequenceBindings (Block bi) of
+           Left err -> recursiveBlockError err
            Right seq -> pure $ foldr (uncurry inline) bo seq 
       c -> pure $ cat c
+
 
