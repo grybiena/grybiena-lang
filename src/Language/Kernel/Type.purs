@@ -1,4 +1,4 @@
-module Language.Type where
+module Language.Kernel.Type where
 
 import Data.BooleanAlgebra ((&&))
 import Data.Eq (class Eq, eq, (==))

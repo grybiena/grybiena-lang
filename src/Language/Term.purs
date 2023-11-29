@@ -47,6 +47,7 @@ data TT a =
   | Let (Map Var a) a
   | TypeAnnotation a Term
   | TypeLit Term
+--  | TypeConstraint a a
   | Native (Native Term)
 
 derive instance Generic (TT a) _
