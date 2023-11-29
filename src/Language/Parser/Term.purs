@@ -93,13 +93,13 @@ parser mod = {
     parens :: forall a. ParserT String m a -> ParserT String m a
     parens = tokenParser.parens
     
-    parseLetRec :: ParserT String m Term
-    parseLetRec = do
+    parseLet :: ParserT String m Term
+    parseLet = do
       reserved "let"
       ds <- tokenParser.braces (tokenParser.semiSep1 parseValueDecl)
       reserved "in"
       body <- parseValue
-      pure $ cat $ LetRec (Map.fromFoldable ds) body
+      pure $ cat $ Let (Map.fromFoldable ds) body
       where
         parseValueDecl = do
            v <- ((Ident <<< TermVar) <$> identifier) 
@@ -112,7 +112,7 @@ parser mod = {
     parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
     
     parseValueAtom :: ParserT String m Term
-    parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLetRec <|> parseIfElse <|> (parens parseValue)
+    parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue)
     
     parseTypeLit :: ParserT String m Term
     parseTypeLit = char '@' *> ((cat <<< TypeLit) <$> parseTypeAtom)

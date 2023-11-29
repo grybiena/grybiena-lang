@@ -9,11 +9,13 @@ import Control.Monad.Except (ExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate)
+import Data.Either (Either(..))
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable, foldr)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
+import Data.Graph.LetRec (LetRec(..))
 import Data.List (List)
 import Data.Map (Map)
 import Data.Map as Map
@@ -24,12 +26,11 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested ((/\))
-import Language.Lambda.Basis (class Basis)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, unifyWithArrow)
 import Language.Lambda.Reduction (class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, rewrite, substitute, unify)
-import Language.Lambda.Unification.Error (class ThrowUnificationError, UnificationError(..), unificationError)
+import Language.Lambda.Unification.Error (class ThrowRecursiveBindingError, class ThrowUnificationError, UnificationError(..), recursiveBindingError, unificationError)
 import Language.Native (class NativeValue, Native(..))
 import Language.Term.LetRec (recSeq)
 import Matryoshka.Class.Recursive (project)
@@ -44,7 +45,7 @@ type Term = Lambda Var TT
 data TT a =
     Star Int
   | Arrow
-  | LetRec (Map Var a) a
+  | Let (Map Var a) a
   | TypeAnnotation a Term
   | TypeLit Term
   | Native (Native Term)
@@ -66,7 +67,7 @@ instance IsStar Mu Var TT where
 instance Functor TT where
   map _ Arrow = Arrow
   map _ (Star i) = Star i
-  map f (LetRec bs a) = LetRec (f <$> bs) (f a)
+  map f (Let bs a) = Let (f <$> bs) (f a)
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (TypeLit t) = TypeLit t
   map _ (Native n) = Native n 
@@ -74,7 +75,7 @@ instance Functor TT where
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
   traverse _ (Star i) = pure (Star i)
-  traverse f (LetRec bs a) = LetRec <$> (traverse f bs) <*> f a
+  traverse f (Let bs a) = Let <$> (traverse f bs) <*> f a
   traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> f a
   traverse _ (TypeLit t) = pure $ TypeLit t
   traverse _ (Native n) = pure $ Native n 
@@ -161,7 +162,7 @@ instance PrettyLambda Var TT where
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
-  prettyCat (LetRec bs a) =
+  prettyCat (Let bs a) =
     (text "let" <+> prettyBinds)
                 </> (text "in" <+> pretty a)
     where
@@ -258,7 +259,7 @@ instance
   ) => Inference Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
-  inference (LetRec bs a) = do
+  inference (Let bs a) = do
      let bx :: List _
          bx = Map.toUnfoldable bs
      flip traverse_ bx $ \(v /\ _) -> do
@@ -304,16 +305,16 @@ instance
   ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
-  , Basis t m Mu Var TT 
   , MonadRec m
-  ) => Reduction t Mu Var TT m where
-  reduction p =
+  , ThrowRecursiveBindingError Mu Var TT m
+  ) => Reduction Mu Var TT m where
+  reduction =
     case _ of
-      LetRec bi bo -> do
-         -- TODO desugar recursive block to a linear sequence of lets using fix
+      Let bi bo -> do
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
-         bz <- recSeq p bi
-         pure $ foldr (uncurry inline) bo bz 
+         case recSeq (LetRec bi) of
+           Left err -> recursiveBindingError err
+           Right seq -> pure $ foldr (uncurry inline) bo seq 
       c -> pure $ cat c
 

@@ -27,7 +27,6 @@ class (Monad (t m), Monad m) <= Basis t m f var cat where
   basisI :: Proxy t -> m (f (LambdaF var cat)) 
   basisC :: Proxy t -> m (f (LambdaF var cat)) 
   basisB :: Proxy t -> m (f (LambdaF var cat)) 
-  basisY :: Proxy t -> m (f (LambdaF var cat)) 
 
 
 instance
@@ -49,7 +48,4 @@ instance
   basisI p = native <$> (fromHomogeneous (unsafeModule p basis))."I"
   basisC p = native <$> (fromHomogeneous (unsafeModule p basis))."C"
   basisB p = native <$> (fromHomogeneous (unsafeModule p basis))."B"
-  basisY p = native <$> (fromHomogeneous (unsafeModule p basis))."Y"
-
-
 

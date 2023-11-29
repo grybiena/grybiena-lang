@@ -41,8 +41,8 @@ testSCC = test "scc" $ do
   Assert.equal expected cc
 
 
-testSCCBroken :: TestSuite
-testSCCBroken = test "sccBroken" $ do
+testSCC' :: TestSuite
+testSCC' = test "scc'" $ do
   let e :: Array (Edge Int)
       e = Edge <$> [(1 /\ 2), (2 /\ 3), (3 /\ 1), (5 /\ 6), (6 /\ 7), (7 /\ 5),(7 /\ 2)] 
       g :: EdgeList.Graph Int
@@ -54,6 +54,21 @@ testSCCBroken = test "sccBroken" $ do
 
   Assert.equal expected cc
 
+testTopSort :: TestSuite
+testTopSort = test "scc'" $ do
+  let e :: Array (Edge Int)
+      e = Edge <$> [(2 /\ 1), (1 /\ 3), (3 /\ 4), (5 /\ 6), (6 /\ 8), (7 /\ 8),(7 /\ 2)] 
+      g :: EdgeList.Graph Int
+      g = EdgeList.Graph $ fromFoldable e
+      cc :: SCC (List Int)
+      cc = projection g
+      expected :: SCC (List Int)
+      expected = SCC $ fromFoldable ((\x -> fromFoldable [x]) <$> [7,5,6,8,2,1,3,4])
+
+  Assert.equal expected cc
+
+
+
 
 
 graphTests :: Effect Unit
@@ -61,5 +76,6 @@ graphTests = runTest do
   suite "Language.Block.Graph" do
     testComponents
     testSCC
-    testSCCBroken
+    testSCC'
+    testTopSort
 

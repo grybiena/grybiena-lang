@@ -15,6 +15,10 @@ import Language.Lambda.Calculus (LambdaF, free)
 import Matryoshka (class Recursive)
 
 newtype LetRec f var cat = LetRec (Map var (f (LambdaF var cat)))
+derive newtype instance (Show var, Show (f (LambdaF var cat))) => Show (LetRec f var cat)
+derive newtype instance (Eq var, Eq (f (LambdaF var cat))) => Eq (LetRec f var cat)
+derive newtype instance (Ord var, Ord (f (LambdaF var cat))) => Ord (LetRec f var cat)
+
 
 instance
   ( Ord var

@@ -18,8 +18,6 @@ import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Console (log)
-import Language.Kernel.Basis (yCombinator)
 import Language.Kernel.Effect (effectNatives)
 import Language.Kernel.Pure (pureModule)
 import Language.Lambda.Calculus (LambdaF(..))
@@ -255,21 +253,6 @@ termTests = runTest do
     testCompileEval "(\\x -> if intGt x 0 then 1 else 0) 5" (Assert.equal 1)
     testCompileEval "(\\x -> if intGt x 0 then 1 else 0) (-5)" (Assert.equal 0)
 
-    testCompileEval "\\g x -> if intGt x 0 then g (intPlus x (-1)) else x"
-                    (\(out :: (Int -> Int) -> Int -> Int) -> do
-                       Assert.equal ((yCombinator out) 1) 0)
-
-
-
-
---    testCompileEval "(\\a -> let { g = \\x -> if intGt x 0 then g (intPlus x (-1)) else x } in g a)"
---                    (\(out :: Int -> Int) -> do
---                       liftEffect $ log $ show (unsafeCoerce out :: Int)
---                       Assert.equal (out 1) 0)
---
-----                  (\(out :: Int -> Int) -> Assert.equal ((fix (\f x -> if x > 0 then f (x-1) else x)) 1) 0 )
-
-
 
 
 
@@ -385,8 +368,7 @@ compile s ty = do
       Left err -> pure $ Left $ ParseError err
       Right val -> do
         let reductionStep v = do 
-              let p = (Proxy :: Proxy Parser)
-              q <- runExceptT $ runExceptT $ reduce p v
+              q <- runExceptT $ runExceptT $ reduce v
               case q of
                 Left err -> throwError $ UnifError err 
                 Right (Left err) -> throwError $ ParseError err
@@ -403,46 +385,16 @@ compile s ty = do
 --                  liftEffect $ log $ prettyPrint u
                   pure u
 
-        let compositionStep v = do 
-              let p = (Proxy :: Proxy Parser)
-              q <- runExceptT $ runExceptT $ composer p v
-              case q of
-                Left err -> throwError $ UnifError err 
-                Right (Left err) -> throwError $ ParseError err
-                Right (Right u) -> do
---                  liftEffect $ log $ prettyPrint u
-                  pure u
-
-
 
         out' <- runExceptT do
            i <- reductionStep val >>= eliminationStep
            j <- reductionStep i >>= eliminationStep
-           k <- reductionStep j >>= eliminationStep
-           compositionStep k
+           reductionStep j >>= eliminationStep
+
+
 --           pure k
 
 
-
---(App
---  (App
---    (App
---      (Cat (Native (S))
---      :: (forall t11 . (forall t12 . (forall t13 . ((t11 -> (t12 -> t13)) -> ((t11 -> t12) -> (t11 -> t13))))))))
---      )
---      (App
---         (Cat (Native ((B Y)))
---          :: ((t17 -> ((t6 -> t7) -> (t6 -> t7))) -> (t17 -> (t6 -> t7)))
---         )
---         (Cat (Native ((C ((B C) ((B (S ((B ifElse) ((C intGt) 0)))) ((C B) ((C intPlus) -1)))))))
---          :: (t49 -> ((Int -> t49) -> (Int -> t49)))
---         )
---      )
---    )
---    (Cat (Native (I)))
---  )
---  (Cat (Native (1)))
--- )
 
         case out' of
           Left err -> pure $ Left err 

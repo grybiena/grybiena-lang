@@ -12,7 +12,6 @@ basis ::
   , "I" :: UnsafeNative "forall a. a -> a" 
   , "C" :: UnsafeNative "forall a b c. (b -> a -> c) -> a -> b -> c"
   , "B" :: UnsafeNative "forall a b c. (b -> c) -> (a -> b) -> a -> c"
-  , "Y" :: UnsafeNative "forall a b. ((a -> b) -> (a -> b)) -> (a -> b)"
   }
 basis = 
   { "S": UnsafeNative
@@ -35,8 +34,5 @@ basis =
            let exp :: forall a b c. (b -> c) -> (a -> b) -> a -> c
                exp x y z = x (y z)
             in unsafeCoerce exp
-  , "Y": UnsafeNative (unsafeCoerce yCombinator)
   }
-
-foreign import yCombinator :: forall a b. ((a -> b) -> (a -> b)) -> (a -> b)
 
