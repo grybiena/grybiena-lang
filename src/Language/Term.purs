@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Monad.Cont (lift)
-import Control.Monad.Error.Class (class MonadThrow, throwError)
+import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (ExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
@@ -24,8 +24,6 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested ((/\))
-import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Console (log)
 import Language.Lambda.Basis (class Basis)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer, unifyWithArrow)
@@ -35,10 +33,10 @@ import Language.Lambda.Unification.Error (class ThrowUnificationError, Unificati
 import Language.Native (class NativeValue, Native(..))
 import Language.Term.LetRec (recSeq)
 import Matryoshka.Class.Recursive (project)
-import Parsing (ParseError(..))
+import Parsing (ParseError)
 import Prettier.Printer (stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
-import Prim (Boolean, Int, Number, Record, String)
+import Prim (Array, Boolean, Int, Number, Record, String)
 
 type Term = Lambda Var TT
 
@@ -279,7 +277,7 @@ instance
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
 
 instance
-  ( Monad m --Effect m
+  ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowUnificationError Term m
@@ -296,7 +294,6 @@ instance
       Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) -> do
         nativeType <- head <$> infer (app a b)
         let nativePretty = "(" <> na.nativePretty <> " " <> nb.nativePretty <> ")"
---        liftEffect $ log $ nativePretty <> " :: " <> prettyPrint nativeType
         pure $ cat (Native (Purescript { nativeType
                                        , nativePretty
                                        , nativeTerm: na.nativeTerm nb.nativeTerm

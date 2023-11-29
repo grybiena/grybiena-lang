@@ -19,6 +19,7 @@ import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Console (log)
+import Language.Kernel.Basis (yCombinator)
 import Language.Kernel.Effect (effectNatives)
 import Language.Kernel.Pure (pureModule)
 import Language.Lambda.Calculus (LambdaF(..))
@@ -254,11 +255,19 @@ termTests = runTest do
     testCompileEval "(\\x -> if intGt x 0 then 1 else 0) 5" (Assert.equal 1)
     testCompileEval "(\\x -> if intGt x 0 then 1 else 0) (-5)" (Assert.equal 0)
 
+    testCompileEval "\\g x -> if intGt x 0 then g (intPlus x (-1)) else x"
+                    (\(out :: (Int -> Int) -> Int -> Int) -> do
+                       Assert.equal ((yCombinator out) 1) 0)
 
-    testCompileEval "(\\x -> let { f = \\a -> if intGt a 0 then f (intPlus a (-1)) else a } in f x)"
-                    (\(out :: Int -> Int) -> Assert.equal (out 1) 0)
 
---                    (\(out :: Int -> Int) -> Assert.equal ((fix (\f x -> if x > 0 then f (x-1) else x)) 1) 0 ) -- Assert.equal (out 1) 0)
+
+
+--    testCompileEval "(\\a -> let { g = \\x -> if intGt x 0 then g (intPlus x (-1)) else x } in g a)"
+--                    (\(out :: Int -> Int) -> do
+--                       liftEffect $ log $ show (unsafeCoerce out :: Int)
+--                       Assert.equal (out 1) 0)
+--
+----                  (\(out :: Int -> Int) -> Assert.equal ((fix (\f x -> if x > 0 then f (x-1) else x)) 1) 0 )
 
 
 

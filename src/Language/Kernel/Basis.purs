@@ -2,7 +2,6 @@ module Language.Kernel.Basis where
 
 import Prelude
 
-import Control.Lazy (fix)
 import Language.Native.Unsafe (UnsafeNative(..))
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -36,9 +35,8 @@ basis =
            let exp :: forall a b c. (b -> c) -> (a -> b) -> a -> c
                exp x y z = x (y z)
             in unsafeCoerce exp
-  , "Y": UnsafeNative
-           let exp :: forall a b. ((a -> b) -> (a -> b)) -> (a -> b)
-               exp = fix
-            in unsafeCoerce exp
+  , "Y": UnsafeNative (unsafeCoerce yCombinator)
   }
+
+foreign import yCombinator :: forall a b. ((a -> b) -> (a -> b)) -> (a -> b)
 
