@@ -24,7 +24,7 @@ data UnificationError f var cat =
   | InvalidApp (f (LambdaF var cat)) (f (LambdaF var cat)) 
   | UnificationError (f (LambdaF var cat)) (f (LambdaF var cat)) 
   | NativeTypeParseError ParseError
-  | RecursiveBlockError (Block f var cat)
+  | RecursiveBlockError (Block var (f (LambdaF var cat)))
 
 derive instance Generic (UnificationError f var cat) _
 
@@ -35,7 +35,7 @@ instance
   show = genericShow
 
 class Monad m <= ThrowRecursiveBlockError f var cat m where
-  recursiveBlockError :: forall a. Block f var cat -> m a
+  recursiveBlockError :: forall a. Block var (f (LambdaF var cat) )-> m a
 
 class Monad m <= ThrowUnificationError typ m where
   unificationError :: forall a. typ -> typ -> m a

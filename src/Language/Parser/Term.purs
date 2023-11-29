@@ -19,6 +19,7 @@ import Data.Tuple (fst, uncurry)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Kernel.Prim (primNatives)
+import Language.Lambda.Block (Block(..))
 import Language.Lambda.Calculus (absMany, app, cat, var)
 import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
 import Language.Native (Native, native)
@@ -56,6 +57,7 @@ derive newtype instance Monad m => Monad (Parser m)
 type TermParser m =
   { parseValue:: Parser m Term
   , parseType :: Parser m Term
+  , parseBlock :: Parser m (Block Var Term)
   }
 
 parser :: forall names row m.
@@ -67,6 +69,7 @@ parser :: forall names row m.
 parser mod = {
     parseValue: Parser parseValue
   , parseType: Parser parseType
+  , parseBlock: Parser parseBlock
   }
   where
     kernel :: Listing (ParserT String m (Native Term))
@@ -93,13 +96,10 @@ parser mod = {
     parens :: forall a. ParserT String m a -> ParserT String m a
     parens = tokenParser.parens
     
-    parseLet :: ParserT String m Term
-    parseLet = do
-      reserved "let"
+    parseBlock :: ParserT String m (Block Var Term)
+    parseBlock = do
       ds <- tokenParser.braces (tokenParser.semiSep1 parseValueDecl)
-      reserved "in"
-      body <- parseValue
-      pure $ cat $ Let (Map.fromFoldable ds) body
+      pure $ Block (Map.fromFoldable ds)
       where
         parseValueDecl = do
            v <- ((Ident <<< TermVar) <$> identifier) 
@@ -107,6 +107,15 @@ parser mod = {
            b <- parseValue
            pure (v /\ b)
 
+
+
+    parseLet :: ParserT String m Term
+    parseLet = do
+      reserved "let"
+      b <- parseBlock
+      reserved "in"
+      body <- parseValue
+      pure $ cat $ Let b body
 
     parseValue :: Monad m => ParserT String m Term
     parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 

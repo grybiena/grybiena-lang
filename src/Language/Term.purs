@@ -17,7 +17,6 @@ import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
 import Language.Lambda.Block (Block(..), sequenceBindings)
 import Data.List (List)
-import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
@@ -44,7 +43,7 @@ type Term = Lambda Var TT
 data TT a =
     Star Int
   | Arrow
-  | Let (Map Var a) a
+  | Let (Block Var a) a
   | TypeAnnotation a Term
   | TypeLit Term
 --  | TypeConstraint a a
@@ -162,7 +161,7 @@ instance PrettyLambda Var TT where
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
-  prettyCat (Let bs a) =
+  prettyCat (Let (Block bs) a) =
     (text "let" <+> prettyBinds)
                 </> (text "in" <+> pretty a)
     where
@@ -259,7 +258,7 @@ instance
   ) => Inference Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
-  inference (Let bs a) = do
+  inference (Let (Block bs) a) = do
      let bx :: List _
          bx = Map.toUnfoldable bs
      flip traverse_ bx $ \(v /\ _) -> do
@@ -313,7 +312,7 @@ instance
       Let bi bo -> do
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
-         case sequenceBindings (Block bi) of
+         case sequenceBindings bi of
            Left err -> recursiveBlockError err
            Right seq -> pure $ foldr (uncurry inline) bo seq 
       c -> pure $ cat c
