@@ -43,11 +43,22 @@ type Term = Lambda Var TT
 data TT a =
     Star Int
   | Arrow
-  | Let (Block Var a) a
+  | Let (Block Var a) a 
   | TypeAnnotation a Term
   | TypeLit Term
---  | TypeConstraint a a
+
   | Native (Native Term)
+
+-- a Class is a dictionary of types
+--  | Class a (Block Var a) a
+
+-- an Instance is a dictionary of terms 
+--  | Instance a (Block Var a) a
+
+-- a TypeConstraint brings a type class dictionary into scope
+--  | TypeConstraint a a
+
+
 
 derive instance Generic (TT a) _
 

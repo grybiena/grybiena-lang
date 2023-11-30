@@ -1,0 +1,1 @@
+\x -> let { i = 1; j = intPlus i 2 } in x i j

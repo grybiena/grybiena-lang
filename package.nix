@@ -14,6 +14,7 @@
    test-dependencies =
       [ test-unit
         console
+        node-fs
       ];
     test-src = "test";
   }

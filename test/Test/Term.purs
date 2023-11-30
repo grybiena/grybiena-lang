@@ -3,7 +3,6 @@ module Test.Term where
 import Prelude
 
 import Control.Comonad.Cofree (head)
-import Control.Lazy (fix)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
@@ -42,54 +41,10 @@ import Test.Unit.Main (runTest)
 import Type.Proxy (Proxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
-testFix :: TestSuite
-testFix = test "fix" $ do
-  let foo :: Int -> Int
-      foo i | i == 0 = 0
-      foo i | i > 0 = foo (i-1)
-      foo i = foo (i+1)
-      foo' :: (Int -> Int) -> Int -> Int
-      foo' _ i | i == 0 = 0
-      foo' f i | i > 0 = f (i-1)
-      foo' f i = f (i+1)
-  Assert.equal (foo 10) ((fix foo') 10)
-  Assert.equal (foo (-10)) ((fix foo') (-10))
-  let a :: Int -> Int
-      a i | i == 0 = 1
-      a i | i > 0 = b i
-      a i = a (i+3)
-      b :: Int -> Int
-      b i | i == 0 = 0
-      b i | i < 0 = a i
-      b i = b (i-2)
-      a' :: ((Int -> Int) -> Int -> Int) -> (Int -> Int) -> Int -> Int
-      a' _ _ i | i == 1 = 1
-      a' _ f i | i > 0 = f i
-      a' s f i = s f (i+3)
-      b' :: (Int -> Int) -> Int -> Int
-      b' _ i | i == 0 = 0
-      b' s i | i < 0 = (fix a') s i
-      b' s i = s (i-2)
-      b'' :: Int -> Int
-      b'' = fix b'
-      a'' :: Int -> Int
-      a'' = (fix a') b''
-  Assert.equal (a 10) (a'' 10)
-  Assert.equal (a (-10)) (a'' (-10))
-  Assert.equal (b 10) (b'' 10)
-  Assert.equal (b (-10)) (b'' (-10))
-
-
-
-
-
-
-
 
 termTests :: Effect Unit
 termTests = runTest do
   suite "Language.Void" do
-    testFix
 
 --    testExpectErr "x" (NotInScope $ TermVar "x")
 --
@@ -100,60 +55,36 @@ termTests = runTest do
 --                  Err "An infinite type was inferred for an expression: (t3 -> t4) while trying to match type t3"
 
     -- I
-    testInferType "\\x -> x" "(t1 -> t1)"
+
     testInferSkiType "\\x -> x" "(forall t2 . (t2 -> t2))"
 
     -- K
-    testInferType "\\x y -> x" "(t1 -> (t2 -> t1))"
+
     testInferSkiType "\\x y -> x" "(t5 -> (t4 -> t5))"
 
 
-    testInferType "\\x y -> y" "(t1 -> (t2 -> t2))" 
+
     testInferSkiType "\\x y -> y" "(t4 -> (forall t6 . (t6 -> t6)))"
 
-    testInferType "\\x -> let { i = 1 } in x i" "((Int -> t4) -> t4)"
-    testInferType "\\x -> let { i = 1; j = 2 } in x i j" "((Int -> (Int -> t7)) -> t7)"
-    testInferType "\\x -> let { i = \\a -> intPlus a 1 } in i x" "(Int -> Int)"
-    testInferType "\\x -> let { i = 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t11)) -> t11)"
-    testInferType "\\x -> let { j = intPlus i 2; i = 1 } in x i j" "((Int -> (Int -> t11)) -> t11)"
-    testInferType "\\x -> let { i = intPlus j 1; j = 2 } in x i j" "((Int -> (Int -> t11)) -> t11)"
-
-
-    testInferType "\\x -> let { i = intPlus j 1; j = intPlus i 2 } in x i j" "((Int -> (Int -> t15)) -> t15)"
-
+  
 
     -- eta reduction 
-    testInferType "\\x y -> x y" "((t2 -> t4) -> (t2 -> t4))"
+
     testInferSkiType "\\x y -> x y" "(t1 -> t1)"
 
-    testInferType "\\x y z -> x y z" "((t2 -> (t3 -> t7)) -> (t2 -> (t3 -> t7)))"
+
     testInferSkiType "\\x y z -> x y z" "((t2 -> t4) -> (t2 -> t4))"
 
-    testInferType "\\x y z a -> x y z a" "((t2 -> (t3 -> (t4 -> t10))) -> (t2 -> (t3 -> (t4 -> t10))))"
+
     testInferSkiType "\\x y z a -> x y z a" "((t2 -> (t3 -> t7)) -> (t2 -> (t3 -> t7)))"
 
     -- K
-    testInferType "\\x y -> y x" "(t1 -> ((t1 -> t4) -> t4))"
+
     testInferSkiType "\\x y -> y x" "(t9 -> ((t9 -> t6) -> t6))"
 
     -- S
-    testInferType "\\x y z -> (x z) (y z)" "((t3 -> (t7 -> t9)) -> ((t3 -> t7) -> (t3 -> t9)))"
-    testInferType "\\x y z -> x z (y z)" "((t3 -> (t7 -> t9)) -> ((t3 -> t7) -> (t3 -> t9)))"
+
     testInferSkiType "\\x y z -> x z (y z)" "((t4 -> (t5 -> t6)) -> ((t4 -> t5) -> (t4 -> t6)))"
-
-    testInferType "1" "Int"
-    testInferType "1.0" "Number"
-
-    testInferType "intPlus 1 1" "Int"
-    testInferType "intPlus 1" "(Int -> Int)"
-    testInferType "intPlus" "(Int -> (Int -> Int))"
-
-
-    testInferType "\\a -> a :: Int" "(Int -> Int)"
-
-
-    testInferType "1 :: Int" "Int" 
-    testInferType "1 :: Int :: *" "Int" 
 
 
     testInferKind "forall a . a" "(t2 -> t2)"
@@ -172,37 +103,31 @@ termTests = runTest do
     testInferKind "Number" "*"
 
     -- Effect
-    testInferType "pureEffect" "(forall t2 . (t2 -> (Effect t2)))"
+
     testInferSkiType "pureEffect" "(forall t2 . (t2 -> (Effect t2)))"
 
-    testInferType "pureEffect @Int" "(Int -> (Effect Int))"
     testInferSkiType "pureEffect @Int" "(Int -> (Effect Int))"
 
-    -- skolemizing removes the forall, encoding its scope into the type variables 
-    testInferType "\\x -> pureEffect x" "(t3 -> (Effect t3))"
+
+
     -- This works by eta reduction
     testInferSkiType "\\x -> pureEffect x" "(forall t2 . (t2 -> (Effect t2)))"
 
-    -- application to a term with a concrete type infers the universally quantified type variable
-    testInferType "(\\x -> pureEffect x) 1" "(Effect Int)"
     testInferSkiType "(\\x -> pureEffect x) 1" "(Effect Int)"
 
-    -- application to a type annotation can be used to explicitly infer the type 
-    testInferType "(\\x -> pureEffect @Int x) 1" "(Effect Int)"
     testInferSkiType "(\\x -> pureEffect @Int x) 1" "(Effect Int)"
 
 
 
-    testInferType "bindEffect @Int @Int"  "((Effect Int) -> ((Int -> (Effect Int)) -> (Effect Int)))"
+
     testInferSkiType "bindEffect @Int @Int"  "((Effect Int) -> ((Int -> (Effect Int)) -> (Effect Int)))"
 
-    testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
     testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
 
-    testInferType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
+
     testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
 
-    testInferType "pureEffect bindEffect" "(Effect (forall t5 . (forall t6 . ((Effect t5) -> ((t5 -> (Effect t6)) -> (Effect t6))))))"
+
     
 
 

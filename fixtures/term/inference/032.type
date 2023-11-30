@@ -1,0 +1,1 @@
+Effect (forall a b. Effect a -> (a -> Effect b) -> Effect b)
