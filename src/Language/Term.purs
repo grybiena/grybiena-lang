@@ -297,11 +297,13 @@ instance
   ) => Composition Mu Var TT m where
   composition a b =
     case project a /\ project b of
-      _ /\ Cat (TypeLit t) -> do
-        at <- infer a
-        arrArg /\ _ <- unifyWithArrow (head at)
-        unify arrArg t
-        rewrite a
+      Cat (Native (Purescript na)) /\ Cat (TypeLit t) -> do
+        case na.nativeType of
+          In (Abs tv tb) -> do
+            unify (var tv :: Term) t
+            tb' <- rewrite tb
+            pure $ cat (Native (Purescript (na { nativeType = tb' })))
+          _ -> pure $ app a b
       Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) -> do
         nativeType <- head <$> infer (app a b)
         let nativePretty = "(" <> na.nativePretty <> " " <> nb.nativePretty <> ")"

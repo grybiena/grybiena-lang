@@ -4,9 +4,11 @@ import Prelude
 
 import Control.Monad.State (State, evalState, get, put)
 import Data.Eq (class Eq1, eq1)
-import Data.Foldable (class Foldable, foldMap, foldl, foldr)
+import Data.Foldable (class Foldable, elem, foldMap, foldl, foldr)
 import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
+import Data.List (List(..))
+import Data.List as List
 import Data.Maybe (Maybe(..), maybe)
 import Data.Set (Set)
 import Data.Set as Set
@@ -80,25 +82,25 @@ freeIn :: forall var cat f .
          => Foldable cat
          => Recursive (f (LambdaF var cat)) (LambdaF var cat)
          => var -> f (LambdaF var cat) -> Boolean
-freeIn v expr = v `Set.member` free expr
+freeIn v expr = v `elem` free expr
 
 
-free :: forall var cat f .
+free :: forall exp var cat .
         Ord var
      => Foldable cat
-     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-     => f (LambdaF var cat) -> Set var
+     => Recursive exp (LambdaF var cat)
+     => exp -> List var
 free = cata freeVars 
 
 
 freeVars :: forall var cat .
         Ord var
      => Foldable cat
-     => Algebra (LambdaF var cat) (Set var)
-freeVars (Abs v a) = Set.delete v a
-freeVars (Var v) = Set.singleton v
-freeVars (App a b) = a `Set.union` b 
-freeVars (Cat c) = foldr Set.union Set.empty c
+     => Algebra (LambdaF var cat) (List var)
+freeVars (Abs v a) = List.delete v a
+freeVars (Var v) = List.singleton v
+freeVars (App a b) = List.nub (a <> b) 
+freeVars (Cat c) = foldl append Nil c
 
 occursIn :: forall var cat f .
             Ord var

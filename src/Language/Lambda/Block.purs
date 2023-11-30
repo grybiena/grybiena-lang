@@ -30,7 +30,7 @@ instance
   , Foldable cat
   , Recursive (f (LambdaF var cat)) (LambdaF var cat)
   ) => AdjacencySet (Block var (f (LambdaF var cat))) var where
-  adjacencySet (Block b) = Graph ((Set.filter (flip elem (Map.keys b)) <<< free) <$> b)
+  adjacencySet (Block b) = Graph ((Set.filter (flip elem (Map.keys b)) <<< Set.fromFoldable <<< free) <$> b)
 
 instance
   ( Ord var

@@ -3,9 +3,11 @@ module Language.Lambda.Inference where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
+import Data.Foldable (class Foldable)
+import Data.List (List)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested ((/\))
-import Language.Lambda.Calculus (class Shadow, LambdaF(..), app, cat, shadow, var)
+import Language.Lambda.Calculus (class Shadow, LambdaF(..), absMany, app, cat, free, shadow, var)
 import Language.Lambda.Unification (class Context, class Fresh, class Rewrite, class Unify, assume, fresh, require, rewrite, unify)
 import Matryoshka.Algebra (Algebra)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
@@ -26,8 +28,14 @@ infer :: forall exp var cat m typ .
      => Arrow typ
      => Shadow var
      => Inference var cat typ m
+     => Ord var
+     => Foldable cat
      => exp -> (m (Cofree (LambdaF var cat) typ)) 
-infer = cata rule
+infer exp = do
+  u <- cata rule exp
+  let q :: List var
+      q = free (head u)
+  pure (absMany q (head u) :< tail u)
 
 rule :: forall var cat m typ .
         Monad m

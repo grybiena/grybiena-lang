@@ -54,38 +54,6 @@ termTests = runTest do
 --    testExpectErr "\\f -> (\\x -> f (x x)) (\\x -> f (x x))" $
 --                  Err "An infinite type was inferred for an expression: (t3 -> t4) while trying to match type t3"
 
-    -- I
-
-    testInferSkiType "\\x -> x" "(forall t2 . (t2 -> t2))"
-
-    -- K
-
-    testInferSkiType "\\x y -> x" "(t5 -> (t4 -> t5))"
-
-
-
-    testInferSkiType "\\x y -> y" "(t4 -> (forall t6 . (t6 -> t6)))"
-
-  
-
-    -- eta reduction 
-
-    testInferSkiType "\\x y -> x y" "(t1 -> t1)"
-
-
-    testInferSkiType "\\x y z -> x y z" "((t2 -> t4) -> (t2 -> t4))"
-
-
-    testInferSkiType "\\x y z a -> x y z a" "((t2 -> (t3 -> t7)) -> (t2 -> (t3 -> t7)))"
-
-    -- K
-
-    testInferSkiType "\\x y -> y x" "(t9 -> ((t9 -> t6) -> t6))"
-
-    -- S
-
-    testInferSkiType "\\x y z -> x z (y z)" "((t4 -> (t5 -> t6)) -> ((t4 -> t5) -> (t4 -> t6)))"
-
 
     testInferKind "forall a . a" "(t2 -> t2)"
     testInferKind "forall a b. a b" "((t4 -> t6) -> (t4 -> t6))"
@@ -101,35 +69,7 @@ termTests = runTest do
 
     testInferKind "Int" "*"
     testInferKind "Number" "*"
-
-    -- Effect
-
-    testInferSkiType "pureEffect" "(forall t2 . (t2 -> (Effect t2)))"
-
-    testInferSkiType "pureEffect @Int" "(Int -> (Effect Int))"
-
-
-
-    -- This works by eta reduction
-    testInferSkiType "\\x -> pureEffect x" "(forall t2 . (t2 -> (Effect t2)))"
-
-    testInferSkiType "(\\x -> pureEffect x) 1" "(Effect Int)"
-
-    testInferSkiType "(\\x -> pureEffect @Int x) 1" "(Effect Int)"
-
-
-
-
-    testInferSkiType "bindEffect @Int @Int"  "((Effect Int) -> ((Int -> (Effect Int)) -> (Effect Int)))"
-
-    testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
-
-
-    testInferSkiType "\\x y -> bindEffect @Int @Int y x" "((Int -> (Effect Int)) -> ((Effect Int) -> (Effect Int)))"
-
-
     
-
 
     -- Compile
     testCompileEval "intPlus 1 1" (Assert.equal 2)

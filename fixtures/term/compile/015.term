@@ -1,0 +1,1 @@
+(\x y -> bindEffect y x) @Int @Int
