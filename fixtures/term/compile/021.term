@@ -1,0 +1,1 @@
+\x -> pureEffect (numPlus 1.0 x)
