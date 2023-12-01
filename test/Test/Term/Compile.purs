@@ -1,4 +1,4 @@
-module Test.Compile where
+module Test.Term.Compile where
 
 import Prelude
 
@@ -30,7 +30,7 @@ import Node.Encoding (Encoding(..))
 import Node.FS.Sync (readTextFile, readdir)
 import Parsing (ParseError)
 import Pretty.Printer (prettyPrint)
-import Test.Infer (structurallyEquivalent)
+import Test.Term.Infer (structurallyEquivalent)
 import Test.Term (termParser, typeParser)
 import Test.Unit (TestSuite, suite, test)
 import Test.Unit.Assert as Assert

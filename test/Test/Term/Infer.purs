@@ -1,4 +1,4 @@
-module Test.Infer where
+module Test.Term.Infer where
 
 import Prelude
 
@@ -29,8 +29,8 @@ import Test.Unit (TestSuite, suite, test)
 import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
 
-inferTestSuite :: Effect Unit
-inferTestSuite = do
+inferTypeSuite :: Effect Unit
+inferTypeSuite = do
   let dir = "fixtures/term/infer"
   ls <- readdir dir
   ts <- traverse buildInferTest (findInferTests dir ls)

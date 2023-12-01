@@ -4,13 +4,15 @@ import Prelude
 
 import Effect (Effect)
 import Test.Graph (graphTests)
-import Test.Infer (inferTestSuite)
-import Test.Compile (compileTestSuite)
 import Test.Term (termTests)
+import Test.Term.Compile (compileTestSuite)
+import Test.Term.Infer (inferTypeSuite)
+import Test.Type.Infer (inferKindSuite)
 
 main :: Effect Unit
 main = do
 --  termTests
   graphTests
-  inferTestSuite
+  inferTypeSuite
+  inferKindSuite
   compileTestSuite

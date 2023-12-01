@@ -55,22 +55,6 @@ termTests = runTest do
 --                  Err "An infinite type was inferred for an expression: (t3 -> t4) while trying to match type t3"
 
 
-    testInferKind "forall a . a" "(t2 -> t2)"
-    testInferKind "forall a b. a b" "((t4 -> t6) -> (t4 -> t6))"
-    testInferKind "forall a b. b a" "(t3 -> ((t3 -> t6) -> t6))" 
-    testInferKind "forall a . a -> a" "(* -> *)"
-    testInferKind "forall a b . a -> b" "(* -> (* -> *))"
-
-    testInferKind "*" "**"
-    testInferKind "* -> *" "*"
-
-    testInferKind "* :: ** :: *** :: ****" "**"
-    testInferKind "**" "***"
-
-    testInferKind "Int" "*"
-    testInferKind "Number" "*"
-    
-
     -- Compile
     testCompileEval "intPlus 1 1" (Assert.equal 2)
     testCompileEval "intPlus (intPlus 1 1) (intPlus 1 1)" (Assert.equal 4)

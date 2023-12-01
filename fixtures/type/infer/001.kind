@@ -1,0 +1,1 @@
+forall k j. (k -> j) -> k -> j 
