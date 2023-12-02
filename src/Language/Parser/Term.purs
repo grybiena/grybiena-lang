@@ -28,16 +28,18 @@ import Language.Native.Reify (nativeTerm, reify)
 import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
+import Language.Parser.Indent (IndentParserT, block1, block1Till, indented, runIndentT, withPos, withPos')
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
-import Parsing (ParserT, runParserT)
+import Parsing (runParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
 import Parsing.String (char, eof)
-import Parsing.Token (GenTokenParser, makeTokenParser)
+import Parsing.Token (makeTokenParser)
 import Type.Proxy (Proxy(..))
 
 instance
-  ( MonadState (TypingContext Var Mu Var TT) m
+  ( Fresh Int m
+  , MonadState (TypingContext Var Mu Var TT) m
   ) => BasisParser Parser m Mu Var TT where
   parseBasis = do
     t <- (parser (homogeneous {})).parseType
@@ -45,9 +47,9 @@ instance
     pure t
 
 instance MonadRec m => StringParserT Parser m where
-  runStringParserT s (Parser p) = runParserT s p
+  runStringParserT s (Parser p) = runIndentT $ runParserT s p
 
-newtype Parser m a = Parser (ParserT String m a)
+newtype Parser m a = Parser (IndentParserT m a)
 derive newtype instance Functor (Parser m)
 derive newtype instance Apply (Parser m)
 derive newtype instance Applicative (Parser m)
@@ -63,8 +65,8 @@ type TermParser m =
 parser :: forall names row m.
           Fresh Int m
        => MonadState (TypingContext Var Mu Var TT) m
-       => ToHomogeneousRow names (ParserT String m (Native Term)) row
-       => NativeModule names (ParserT String m (Native Term))
+       => ToHomogeneousRow names (IndentParserT m (Native Term)) row
+       => NativeModule names (IndentParserT m (Native Term))
        -> TermParser m
 parser mod = {
     parseValue: Parser parseValue
@@ -72,31 +74,31 @@ parser mod = {
   , parseBlock: Parser parseBlock
   }
   where
-    kernel :: Listing (ParserT String m (Native Term))
+    kernel :: Listing (IndentParserT m (Native Term))
     kernel = moduleListing mod
 
-    tokenParser :: GenTokenParser String m 
+
     tokenParser = makeTokenParser (languageDef (fromFoldable (fst <$> kernel)))
 
-    integer :: ParserT String m Int
+    integer :: IndentParserT m Int
     integer = tokenParser.integer 
     
-    number :: ParserT String m Number
+    number :: IndentParserT m Number
     number = tokenParser.float
     
-    reservedOp :: String -> ParserT String m Unit
+    reservedOp :: String -> IndentParserT m Unit
     reservedOp = tokenParser.reservedOp
      
-    reserved :: String -> ParserT String m Unit
+    reserved :: String -> IndentParserT m Unit
     reserved = tokenParser.reserved
 
-    identifier :: ParserT String m String
+    identifier :: IndentParserT m String
     identifier = tokenParser.identifier
         
-    parens :: forall a. ParserT String m a -> ParserT String m a
+    parens :: forall a. IndentParserT m a -> IndentParserT m a
     parens = tokenParser.parens
     
-    parseBlock :: ParserT String m (Block Var Term)
+    parseBlock :: IndentParserT m (Block Var Term)
     parseBlock = do
       ds <- tokenParser.braces (tokenParser.semiSep1 parseValueDecl)
       pure $ Block (Map.fromFoldable ds)
@@ -107,41 +109,60 @@ parser mod = {
            b <- parseValue
            pure (v /\ b)
 
+    parseLet :: IndentParserT m Term
+    parseLet = (try parseLetB) <|> parseLetI 
+      where
+        parseLetI :: IndentParserT m Term
+        parseLetI = do
+          l <- withPos' (reserved "let") do
+             indented
+             block1Till parseValueDecl (reserved "in")
+
+          body <- parseValue
+          pure $ cat $ Let (Block (Map.fromFoldable l)) body
+          where
+            parseValueDecl = do
+               v <- ((Ident <<< TermVar) <$> identifier) 
+               reservedOp "="
+               b <- parseValue
+               reservedOp ";"
+               pure (v /\ b)
+    
+        parseLetB :: IndentParserT m Term
+        parseLetB = do
+          reserved "let"
+          b <- parseBlock
+          reserved "in"
+          body <- parseValue
+          pure $ cat $ Let b body
 
 
-    parseLet :: ParserT String m Term
-    parseLet = do
-      reserved "let"
-      b <- parseBlock
-      reserved "in"
-      body <- parseValue
-      pure $ cat $ Let b body
 
-    parseValue :: Monad m => ParserT String m Term
+    parseValue :: Monad m => IndentParserT m Term
     parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
     
-    parseValueAtom :: ParserT String m Term
+    parseValueAtom :: IndentParserT m Term
     parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue)
     
-    parseTypeLit :: ParserT String m Term
+    parseTypeLit :: IndentParserT m Term
     parseTypeLit = char '@' *> ((cat <<< TypeLit) <$> parseTypeAtom)
     
-    parseNumeric ::  ParserT String m Term
+    parseNumeric ::  IndentParserT m Term
     parseNumeric = (try parseNumber) <|> parseInt
     
-    parseInt ::  ParserT String m Term
+    parseInt ::  IndentParserT m Term
     parseInt = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> integer
      
-    parseNatives :: ParserT String m Term
+    parseNatives :: IndentParserT m Term
     parseNatives = choice $ map (uncurry parseNative) kernel
      
-    parseNative ::  String -> ParserT String m (Native Term) -> ParserT String m Term
+    parseNative ::  String -> IndentParserT m (Native Term) -> IndentParserT m Term
     parseNative name native = reserved name *> ((cat <<< Native) <$> native)
      
-    parseNumber ::  ParserT String m Term
+    parseNumber ::  IndentParserT m Term
     parseNumber = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> number 
 
-    parseIfElse :: ParserT String m Term
+    parseIfElse :: IndentParserT m Term
     parseIfElse = do
       reserved "if"
       x <- parseValue
@@ -153,59 +174,59 @@ parser mod = {
       pure $ app (app (app i x) a) b
 
     
-    parseTypeAnnotation :: Term -> ParserT String m Term
+    parseTypeAnnotation :: Term -> IndentParserT m Term
     parseTypeAnnotation v = do
       reservedOp "::"
       t <- parseType
       pure $ cat $ TypeAnnotation v t
      
-    parseAbs :: ParserT String m Term
+    parseAbs :: IndentParserT m Term
     parseAbs = absMany <$> parsePats <*> parseValue
       where
         parsePats = reservedOp "\\" *> many1Till (Ident <<< TermVar <$> identifier) (reservedOp "->")
     
-    parseApp :: Term -> ParserT String m Term
+    parseApp :: Term -> IndentParserT m Term
     parseApp v = app v <$> parseValueAtom
     
-    parseType :: Monad m => ParserT String m Term
+    parseType :: Monad m => IndentParserT m Term
     parseType = buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom 
     
-    parseTypeAtom :: ParserT String m Term
+    parseTypeAtom :: IndentParserT m Term
     parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< Ident <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType)
     
-    parseTypeInt ::  ParserT String m Term
+    parseTypeInt ::  IndentParserT m Term
     parseTypeInt = reserved "Int" *> pure (reify (Proxy :: Proxy Int))
      
-    parseTypeNumber :: ParserT String m Term
+    parseTypeNumber :: IndentParserT m Term
     parseTypeNumber = reserved "Number" *> pure (reify (Proxy :: Proxy Number))
       
-    parseTypeEffect ::  ParserT String m Term
+    parseTypeEffect ::  IndentParserT m Term
     parseTypeEffect = reserved "Effect" *> pure (reify (Proxy :: Proxy Effect))
     
     
-    parseTypeArrow :: Term -> ParserT String m Term
+    parseTypeArrow :: Term -> IndentParserT m Term
     parseTypeArrow a = do
       reservedOp "->"
       b <- parseType
       pure (app (app (cat Arrow) a) b)
     
-    parseStar ::  ParserT String m Term
+    parseStar ::  IndentParserT m Term
     parseStar = choice (star <$> (1 .. 4))
       where
         star i = do
           reservedOp (fromCharArray (replicate i '*'))
           pure $ cat (Star i)
     
-    parseTypeAbs :: ParserT String m Term
+    parseTypeAbs :: IndentParserT m Term
     parseTypeAbs = absMany <$> parsePats <*> parseType
       where
         parsePats = reservedOp "forall" *> many1Till scopedVar (reservedOp ".")
         scopedVar = do
           i <- identifier
-          s <- lift fresh
+          s <- lift $ lift fresh
           pure $ Scoped (TypeVar i) (Scope s)
     
-    parseTypeApp :: Term -> ParserT String m Term
+    parseTypeApp :: Term -> IndentParserT m Term
     parseTypeApp v = app v <$> parseTypeAtom
     
 

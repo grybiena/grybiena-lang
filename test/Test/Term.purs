@@ -14,9 +14,10 @@ import Language.Native.Module (NativeModule, nativeModuleUnion)
 import Language.Native.Reify (nativeModule)
 import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (runStringParserT)
+import Language.Parser.Indent (IndentParserT)
 import Language.Parser.Term (Parser(..), parser)
 import Language.Term (TT, Term, Var)
-import Parsing (ParseError, ParserT)
+import Parsing (ParseError)
 import Parsing.String (eof)
 import Type.Proxy (Proxy(..))
 
@@ -33,7 +34,7 @@ typeParser s = runStringParserT s do
 
 termParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term)
 termParser s = runStringParserT s do
-  let mm :: NativeModule _ (ParserT String m (Native Term))
+  let mm :: NativeModule _ (IndentParserT m (Native Term))
       mm = (unsafeModule (Proxy :: Proxy Parser) effectNatives)
       someKernel = nativeModuleUnion (nativeModule pureModule) mm 
   v <- (parser someKernel).parseValue
