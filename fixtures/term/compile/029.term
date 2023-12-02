@@ -1,4 +1,4 @@
 (\x -> let
-         i = intPlus j 2;
-         j = 1;
+         i = intPlus j 2
+         j = 1
        in x j i) intPlus

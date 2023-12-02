@@ -124,8 +124,7 @@ parser mod = {
             parseValueDecl = do
                v <- ((Ident <<< TermVar) <$> identifier) 
                reservedOp "="
-               b <- parseValue
-               reservedOp ";"
+               b <- parseValueI
                pure (v /\ b)
     
         parseLetB :: IndentParserT m Term
@@ -136,7 +135,12 @@ parser mod = {
           body <- parseValue
           pure $ cat $ Let b body
 
-
+    parseValueI :: Monad m => IndentParserT m Term
+    parseValueI = indented *> (buildExprParser [] (buildPostfixParser [parseAppI, parseTypeAnnotation] parseValueAtomI)) 
+    
+    parseValueAtomI :: IndentParserT m Term
+    parseValueAtomI = defer $ \_ -> indented *> (parseAbsI <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValueI))
+ 
 
     parseValue :: Monad m => IndentParserT m Term
     parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
@@ -179,7 +183,15 @@ parser mod = {
       reservedOp "::"
       t <- parseType
       pure $ cat $ TypeAnnotation v t
-     
+ 
+    parseAbsI :: IndentParserT m Term
+    parseAbsI = absMany <$> parsePats <*> parseValueI
+      where
+        parsePats = reservedOp "\\" *> many1Till (Ident <<< TermVar <$> identifier) (reservedOp "->")
+    
+    parseAppI :: Term -> IndentParserT m Term
+    parseAppI v = app v <$> parseValueAtomI 
+
     parseAbs :: IndentParserT m Term
     parseAbs = absMany <$> parsePats <*> parseValue
       where
