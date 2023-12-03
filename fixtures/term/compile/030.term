@@ -1,0 +1,6 @@
+(\x -> let
+         i :: Int
+         i = intPlus j 2
+         j :: Int
+         j = 1
+       in x j i) intPlus

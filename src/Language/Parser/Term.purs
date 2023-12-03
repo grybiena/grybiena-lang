@@ -6,13 +6,14 @@ import Prelude
 import Control.Alt ((<|>))
 import Control.Lazy (defer)
 import Control.Monad.Cont (lift)
-import Control.Monad.Rec.Class (class MonadRec)
+import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Control.Monad.State (class MonadState)
 import Data.Array (fromFoldable, replicate)
 import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
 import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
-import Data.List ((..))
+import Data.List (List(..), (..), (:))
+import Data.List as List
 import Data.Map as Map
 import Data.String.CodeUnits (fromCharArray)
 import Data.Tuple (fst, uncurry)
@@ -28,13 +29,14 @@ import Language.Native.Reify (nativeTerm, reify)
 import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
-import Language.Parser.Indent (IndentParserT, Positioned, block1Till, indented, runIndentT, withPos')
+import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos')
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
-import Parsing (runParserT)
+import Parsing (fail, runParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
 import Parsing.String (char, eof)
 import Parsing.Token (GenTokenParser, makeTokenParser)
+import Pretty.Printer (prettyPrint)
 import Type.Proxy (Proxy(..))
 
 instance
@@ -62,6 +64,14 @@ type TermParser m =
   , parseBlock :: Parser m (Block Var Term)
   }
 
+data Decl =
+    TypeDecl Var Term
+  | ValueDecl Var Term
+
+instance Show Decl where
+  show (TypeDecl v t) = prettyPrint v <> " :: " <> prettyPrint t
+  show (ValueDecl v t) = prettyPrint v <> " = " <> prettyPrint t
+
 parser :: forall names row m.
           Fresh Int m
        => MonadState (TypingContext Var Mu Var TT) m
@@ -71,7 +81,7 @@ parser :: forall names row m.
 parser mod = {
     parseValue: Parser parseValue
   , parseType: Parser parseType
-  , parseBlock: Parser parseBlock
+  , parseBlock: Parser ((try parseBlockB) <|> parseBlockI)
   }
   where
     kernel :: Listing (IndentParserT m (Native Term))
@@ -97,40 +107,51 @@ parser mod = {
         
     parens :: forall a. IndentParserT m a -> IndentParserT m a
     parens = tokenParser.parens
-    
-    parseBlock :: IndentParserT m (Block Var Term)
-    parseBlock = do
-      ds <- tokenParser.braces (tokenParser.semiSep1 parseValueDecl)
+     
+    parseBlockX :: (forall a. IndentParserT m a -> IndentParserT m (List a)) -> IndentParserT m (Block Var Term)
+    parseBlockX f = do
+      ls <- f ((try parseTypeDecl) <|> parseValueDecl)
+      ds <- tailRecM annotateVals (Nil /\ ls)
       pure $ Block (Map.fromFoldable ds)
       where
+        annotateVals (d /\ Nil) = pure $ Done d
+        annotateVals (d /\ ((ValueDecl v b):r)) = pure $ Loop (((v /\ b):d) /\ r)
+        annotateVals (d /\ ((TypeDecl vt t):(ValueDecl vv v):r)) | vt == vv =
+           pure $ Loop (((vv /\ (cat $ TypeAnnotation v t)):d) /\ r)
+        annotateVals (_ /\ (TypeDecl vt _):r) = fail $ prettyPrint vt <> " type declaration not followed by value declaration. " <> show r
+        parseTypeDecl = do
+           v <- ((Ident <<< TermVar) <$> identifier) 
+           reservedOp "::"
+           b <- parseType
+           pure (TypeDecl v b)
         parseValueDecl = do
            v <- ((Ident <<< TermVar) <$> identifier) 
            reservedOp "="
            b <- parseValue
-           pure (v /\ b)
+           pure (ValueDecl v b)   
+
+    parseBlockB :: Monad m => IndentParserT m (Block Var Term)
+    parseBlockB = parseBlockX (map List.fromFoldable <<< tokenParser.braces <<< tokenParser.semiSep1)
+
+    parseBlockI :: Monad m => IndentParserT m (Block Var Term)
+    parseBlockI = parseBlockX block1
 
     parseLet :: IndentParserT m Term
     parseLet = (try parseLetB) <|> parseLetI 
       where
         parseLetI :: IndentParserT m Term
         parseLetI = do
-          l <- withPos' (reserved "let") do
+          b <- withPos' (reserved "let") do
              indented
-             block1Till parseValueDecl (reserved "in")
-
+             parseBlockI
+          reserved "in"
           body <- parseValue
-          pure $ cat $ Let (Block (Map.fromFoldable l)) body
-          where
-            parseValueDecl = do
-               v <- ((Ident <<< TermVar) <$> identifier) 
-               reservedOp "="
-               b <- parseValue
-               pure (v /\ b)
+          pure $ cat $ Let b body
     
         parseLetB :: IndentParserT m Term
         parseLetB = do
           reserved "let"
-          b <- parseBlock
+          b <- parseBlockB
           reserved "in"
           body <- parseValue
           pure $ cat $ Let b body
@@ -187,10 +208,10 @@ parser mod = {
     parseApp v = app v <$> parseValueAtom
     
     parseType :: Monad m => IndentParserT m Term
-    parseType = buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom 
+    parseType = indented *> (buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom) 
     
     parseTypeAtom :: IndentParserT m Term
-    parseTypeAtom = defer $ \_ -> parseTypeAbs <|> ((var <<< Ident <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType)
+    parseTypeAtom = defer $ \_ -> indented *> (parseTypeAbs <|> ((var <<< Ident <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType))
     
     parseTypeInt ::  IndentParserT m Term
     parseTypeInt = reserved "Int" *> pure (reify (Proxy :: Proxy Int))

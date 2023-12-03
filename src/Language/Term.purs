@@ -328,6 +328,9 @@ instance
          case sequenceBindings bi of
            Left err -> recursiveBlockError err
            Right seq -> pure $ foldr (uncurry inline) bo seq 
+      TypeAnnotation (In (Cat (Native (Purescript na)))) t -> do
+         unify na.nativeType t
+         pure (cat (Native (Purescript (na { nativeType = t }))))
       c -> pure $ cat c
 
 
