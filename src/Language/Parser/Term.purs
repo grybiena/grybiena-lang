@@ -28,13 +28,13 @@ import Language.Native.Reify (nativeTerm, reify)
 import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
-import Language.Parser.Indent (IndentParserT, block1, block1Till, indented, runIndentT, withPos, withPos')
+import Language.Parser.Indent (IndentParserT, Positioned, block1Till, indented, runIndentT, withPos')
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
 import Parsing (runParserT)
 import Parsing.Combinators (choice, many1Till, try)
 import Parsing.Expr (buildExprParser)
 import Parsing.String (char, eof)
-import Parsing.Token (makeTokenParser)
+import Parsing.Token (GenTokenParser, makeTokenParser)
 import Type.Proxy (Proxy(..))
 
 instance
@@ -77,7 +77,7 @@ parser mod = {
     kernel :: Listing (IndentParserT m (Native Term))
     kernel = moduleListing mod
 
-
+    tokenParser :: GenTokenParser String (Positioned m)
     tokenParser = makeTokenParser (languageDef (fromFoldable (fst <$> kernel)))
 
     integer :: IndentParserT m Int
@@ -124,7 +124,7 @@ parser mod = {
             parseValueDecl = do
                v <- ((Ident <<< TermVar) <$> identifier) 
                reservedOp "="
-               b <- parseValueI
+               b <- parseValue
                pure (v /\ b)
     
         parseLetB :: IndentParserT m Term
@@ -135,18 +135,12 @@ parser mod = {
           body <- parseValue
           pure $ cat $ Let b body
 
-    parseValueI :: Monad m => IndentParserT m Term
-    parseValueI = indented *> (buildExprParser [] (buildPostfixParser [parseAppI, parseTypeAnnotation] parseValueAtomI)) 
-    
-    parseValueAtomI :: IndentParserT m Term
-    parseValueAtomI = defer $ \_ -> indented *> (parseAbsI <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValueI))
- 
-
     parseValue :: Monad m => IndentParserT m Term
-    parseValue = buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom) 
+    parseValue = indented *> (buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom)) 
     
     parseValueAtom :: IndentParserT m Term
-    parseValueAtom = defer $ \_ -> parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue)
+    parseValueAtom = defer $ \_ -> indented *> (parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
+ 
     
     parseTypeLit :: IndentParserT m Term
     parseTypeLit = char '@' *> ((cat <<< TypeLit) <$> parseTypeAtom)
@@ -184,14 +178,6 @@ parser mod = {
       t <- parseType
       pure $ cat $ TypeAnnotation v t
  
-    parseAbsI :: IndentParserT m Term
-    parseAbsI = absMany <$> parsePats <*> parseValueI
-      where
-        parsePats = reservedOp "\\" *> many1Till (Ident <<< TermVar <$> identifier) (reservedOp "->")
-    
-    parseAppI :: Term -> IndentParserT m Term
-    parseAppI v = app v <$> parseValueAtomI 
-
     parseAbs :: IndentParserT m Term
     parseAbs = absMany <$> parsePats <*> parseValue
       where
