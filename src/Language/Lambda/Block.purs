@@ -6,15 +6,15 @@ import Prelude
 import Data.Either (Either(..))
 import Data.Foldable (class Foldable)
 import Data.Graph.AdjacencySet (class AdjacencySet, Graph(..), adjacencySet)
-import Data.List (List, elem, reverse)
+import Data.List (List, elem)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Topos.Pointed.Projection (class Projection, CC, SCC(..), projection)
 import Data.Traversable (class Traversable, traverse)
-import Data.Tuple.Nested (type (/\))
-import Language.Lambda.Calculus (LambdaF, free)
+import Data.Tuple.Nested (type (/\), (/\))
+import Language.Lambda.Calculus (LambdaF, free, freeIn)
 import Matryoshka (class Recursive)
 
 newtype Block var term = Block (Map var term)
@@ -81,7 +81,7 @@ sequenceBindings lr =
           failOnSCC :: Block var (f (LambdaF var cat))
                     -> Either (Block var (f (LambdaF var cat))) (Binding var (f (LambdaF var cat))) 
           failOnSCC (Block s) = case Map.toUnfoldable s of
-                  [z] -> Right z
+                  [v /\ t] -> if v `freeIn` t then Left (Block s) else Right (v /\ t)
                   _ -> Left $ Block s
-       in reverse <$> traverse failOnSCC scc
+       in traverse failOnSCC scc
 

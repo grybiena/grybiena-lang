@@ -6,16 +6,14 @@ import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Monad.Cont (lift)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (ExceptT)
-import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
 import Data.Array (replicate)
 import Data.Either (Either(..))
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
-import Data.Foldable (class Foldable, foldr)
+import Data.Foldable (class Foldable, foldMap, foldl, foldr)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Language.Lambda.Block (Block(..), sequenceBindings)
 import Data.List (List)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
@@ -24,7 +22,8 @@ import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
-import Data.Tuple.Nested ((/\))
+import Data.Tuple.Nested (type (/\), (/\))
+import Language.Lambda.Block (Block(..), sequenceBindings)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer)
 import Language.Lambda.Reduction (class Composition, class Reduction)
@@ -103,9 +102,24 @@ instance Eq1 TT where
   eq1 = genericEq
 
 instance Foldable TT where
-  foldr _ b _ = b
-  foldl _ b _ = b
-  foldMap _ _ = mempty
+  foldr _ b (Star _) = b
+  foldr _ b Arrow = b
+  foldr f b (Let bs bd) = foldr f (f bd b) bs
+  foldr f b (TypeAnnotation a _) = f a b
+  foldr _ b (TypeLit _) = b
+  foldr _ b (Native _) = b
+  foldl _ b (Star _) = b
+  foldl _ b Arrow = b
+  foldl f b (Let bs bd) = f (foldl f b bs) bd
+  foldl f b (TypeAnnotation a _) = f b a
+  foldl _ b (TypeLit _) = b
+  foldl _ b (Native _) = b
+  foldMap _ (Star _) = mempty
+  foldMap _ Arrow = mempty
+  foldMap f (Let bs b) = foldMap f bs <> f b
+  foldMap f (TypeAnnotation a _) = f a
+  foldMap _ (TypeLit _) = mempty
+  foldMap _ (Native _) = mempty
 
 newtype Scope = Scope Int
 derive newtype instance Show Scope
@@ -317,17 +331,32 @@ instance
   ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
-  , MonadRec m
   , ThrowRecursiveBlockError Mu Var TT m
+  , NotInScopeError Var m
+  , ThrowUnificationError Term m
+  , InfiniteTypeError Var Term m
   ) => Reduction Mu Var TT m where
   reduction =
     case _ of
       Let bi bo -> do
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
+             annotate :: Var -> Term -> m (Var /\ Term)
+             annotate v t =
+               case project t of
+                  (Cat (TypeAnnotation q r)) -> do
+                    qt <- head <$> infer q
+                    unify qt r
+                    pure (v /\ q)
+                  _ -> pure (v /\ t)               
          case sequenceBindings bi of
            Left err -> recursiveBlockError err
-           Right seq -> pure $ foldr (uncurry inline) bo seq 
+           Right seq -> do
+              flip traverse_ seq $ \(v /\ _) -> do
+                 t <- fresh
+                 assume v t
+              seq' <- traverse (uncurry annotate) seq
+              pure $ foldl (flip $ uncurry inline) bo seq' 
       TypeAnnotation (In (Cat (Native (Purescript na)))) t -> do
          unify na.nativeType t
          pure (cat (Native (Purescript (na { nativeType = t }))))

@@ -1,0 +1,8 @@
+(\x -> let
+         i :: Int
+         i = intPlus j 2
+         j :: Int
+         j = if intGt (x 5 6) 0
+             then 1
+             else (-1)
+       in x j i) intPlus

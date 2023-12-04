@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Except (runExceptT)
-import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
+import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
 import Data.Array (catMaybes, elem, nub, (!!))
 import Data.Either (Either(..))
@@ -19,7 +19,7 @@ import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Language.Lambda.Calculus (LambdaF(..))
-import Language.Lambda.Reduction (elimAbs, reduce)
+import Language.Lambda.Reduction (elimReduce)
 import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
 import Language.Lambda.Unification.Error (UnificationError)
 import Language.Native (Native(..))
@@ -30,8 +30,8 @@ import Node.Encoding (Encoding(..))
 import Node.FS.Sync (readTextFile, readdir)
 import Parsing (ParseError)
 import Pretty.Printer (prettyPrint)
-import Test.Term.Infer (structurallyEquivalent)
 import Test.Term (termParser, typeParser)
+import Test.Term.Infer (structurallyEquivalent)
 import Test.Unit (TestSuite, suite, test)
 import Test.Unit.Assert as Assert
 import Test.Unit.Main (runTest)
@@ -98,31 +98,15 @@ compiles s e = do
     case Tuple <$> t <*> ty of
       Left err -> pure $ Left $ ParseError err
       Right (val /\ typ) -> do
-        let reductionStep v = do 
-              q <- runExceptT $ runExceptT $ reduce v
-              case q of
-                Left err -> throwError $ UnifError err 
-                Right (Left err) -> throwError $ ParseError err
-                Right (Right u) -> do
-                  pure u
-
-        let eliminationStep v = do 
+        let compileFix v = do
               let p = (Proxy :: Proxy Parser)
-              q <- runExceptT $ runExceptT $ elimAbs p v
+              q <- runExceptT $ runExceptT $ elimReduce p v
               case q of
                 Left err -> throwError $ UnifError err 
                 Right (Left err) -> throwError $ ParseError err
                 Right (Right u) -> pure u
 
-        let compileFix = tailRecM go
-              where
-                go v = do
-                  v' <- reductionStep v >>= eliminationStep
-                  if v == v'
-                    then pure $ Done v
-                    else pure $ Loop v'
-
-        out' <- runExceptT $ compileFix val
+        out' <- runExceptT $ compileFix val 
         case out' of
           Left err -> pure $ Left err 
           Right out -> do            
@@ -130,5 +114,5 @@ compiles s e = do
               Cat (Native (Purescript { nativeType })) -> do
                 ok <- liftAff $ structurallyEquivalent nativeType typ
                 if ok then pure $ Right unit else pure $ Left $ TypeError $ prettyPrint typ <> " =?= " <> prettyPrint nativeType
-              _ -> pure $ Left $ ReductionError $ show out 
+              _ -> pure $ Left $ ReductionError $ prettyPrint out 
  

@@ -4,14 +4,14 @@ module Language.Lambda.Reduction where
 
 import Prelude
 
+import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Data.Traversable (class Traversable, traverse)
 import Language.Lambda.Basis (class Basis, basisB, basisC, basisI, basisK, basisS)
 import Language.Lambda.Calculus (LambdaF(..), abs, app, cat, freeIn, var)
 import Language.Lambda.Inference (class IsType)
-import Matryoshka.Algebra (AlgebraM)
+import Language.Lambda.Unification (class Context, class Fresh, class NotInScopeError, assume, fresh)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
-import Matryoshka.Fold (cataM)
 import Type.Proxy (Proxy)
 
 class Composition f var cat m where 
@@ -22,55 +22,54 @@ class Composition f var cat m where
 class Reduction f var cat m where
   reduction :: cat (f (LambdaF var cat))
             -> m (f (LambdaF var cat))
- 
-composer :: forall f var cat m.
+
+elimReduce :: forall t f var cat m.
              Recursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Composition f var cat m
          => Reduction f var cat m
          => Eq (f (LambdaF var cat))
-         => Monad m
+         => MonadRec m
+         => Ord var
          => Traversable cat
-         => f (LambdaF var cat) -> m (f (LambdaF var cat))
-composer = cataM composeLambda
-
-composeLambda :: forall f var cat m.
-             Recursive (f (LambdaF var cat)) (LambdaF var cat) 
-         => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
-         => Composition f var cat m
-         => Reduction f var cat m
-         => Applicative m
-         => AlgebraM m (LambdaF var cat) (f (LambdaF var cat))
-composeLambda =
-  case _ of
-    Var v -> pure $ var v
-    Abs x e -> pure $ abs x e
-    App a b -> composition a b
-    Cat c -> pure $ cat c 
-
+         => Functor cat
+         => Basis t m f var cat
+         => IsType (f (LambdaF var cat))
+         => Fresh (f (LambdaF var cat)) m
+         => Ord var
+         => NotInScopeError var m
+         => Context var (f (LambdaF var cat)) m
+         => Proxy t -> f (LambdaF var cat) -> m (f (LambdaF var cat))
+elimReduce p l = tailRecM go l
+  where go x = do
+          y <- reduce x >>= elimAbs p
+          if y == x
+            then pure $ Done x
+            else pure $ Loop y 
+ 
 reduce :: forall f var cat m.
              Recursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
          => Composition f var cat m
          => Reduction f var cat m
-         => Eq (f (LambdaF var cat))
          => Monad m
-         => Traversable cat
+         => Fresh (f (LambdaF var cat)) m
+         => Ord var
+         => NotInScopeError var m
+         => Context var (f (LambdaF var cat)) m
          => f (LambdaF var cat) -> m (f (LambdaF var cat))
-reduce = cataM reduceLambda
-
-reduceLambda :: forall f var cat m.
-             Recursive (f (LambdaF var cat)) (LambdaF var cat) 
-         => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
-         => Composition f var cat m
-         => Reduction f var cat m
-         => Applicative m
-         => AlgebraM m (LambdaF var cat) (f (LambdaF var cat))
-reduceLambda =
-  case _ of
+reduce l =
+  case project l of
     Var v -> pure $ var v
-    Abs x e -> pure $ abs x e
-    App a b -> composition a b
+    Abs x e -> do
+       (t :: f (LambdaF var cat)) <- fresh
+       assume x t
+       e' <- reduce e
+       pure $ abs x e'
+    App a b -> do
+       a' <- reduce a
+       b' <- reduce b
+       composition a' b'
     Cat c -> reduction c
 
 -- Annotated with rules described here https://en.wikipedia.org/wiki/Combinatory_logic#Combinators_B,_C
