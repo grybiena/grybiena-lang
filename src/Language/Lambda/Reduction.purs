@@ -10,6 +10,7 @@ import Language.Lambda.Basis (class Basis, basisB, basisC, basisI, basisK, basis
 import Language.Lambda.Calculus (LambdaF(..), abs, app, cat, freeIn, var)
 import Language.Lambda.Inference (class IsType)
 import Language.Lambda.Unification (class Context, class Fresh, class NotInScopeError, assume, fresh)
+import Matryoshka (AlgebraM, CoalgebraM, hyloM)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Type.Proxy (Proxy)
@@ -53,24 +54,55 @@ reduce :: forall f var cat m.
          => Composition f var cat m
          => Reduction f var cat m
          => Monad m
+         => Traversable cat
          => Fresh (f (LambdaF var cat)) m
          => Ord var
          => NotInScopeError var m
          => Context var (f (LambdaF var cat)) m
          => f (LambdaF var cat) -> m (f (LambdaF var cat))
-reduce l =
-  case project l of
+reduce = hyloM reduceAl reduceCo
+
+reduceAl :: forall f var cat m.
+             Recursive (f (LambdaF var cat)) (LambdaF var cat) 
+         => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
+         => Composition f var cat m
+         => Reduction f var cat m
+         => Monad m
+         => Fresh (f (LambdaF var cat)) m
+         => Ord var
+         => NotInScopeError var m
+         => Context var (f (LambdaF var cat)) m
+         => AlgebraM m (LambdaF var cat) (f (LambdaF var cat))
+reduceAl =
+  case _ of
     Var v -> pure $ var v
+    Abs x e -> pure $ abs x e 
+    App a b -> composition a b
+    Cat c -> reduction c
+
+
+reduceCo :: forall f var cat m.
+             Recursive (f (LambdaF var cat)) (LambdaF var cat) 
+         => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
+         => Composition f var cat m
+         => Reduction f var cat m
+         => Monad m
+         => Fresh (f (LambdaF var cat)) m
+         => Ord var
+         => NotInScopeError var m
+         => Context var (f (LambdaF var cat)) m
+         => CoalgebraM m (LambdaF var cat) (f (LambdaF var cat))
+reduceCo l =
+  case project l of
+    Var v -> pure $ Var v
     Abs x e -> do
        (t :: f (LambdaF var cat)) <- fresh
-       assume x t
-       e' <- reduce e
-       pure $ abs x e'
-    App a b -> do
-       a' <- reduce a
-       b' <- reduce b
-       composition a' b'
-    Cat c -> reduction c
+       assume x t 
+       pure $ Abs x e
+    App a b -> pure $ App a b
+    Cat c -> pure $ Cat c
+
+
 
 -- Annotated with rules described here https://en.wikipedia.org/wiki/Combinatory_logic#Combinators_B,_C
 elimAbs :: forall f var cat t m.
