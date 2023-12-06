@@ -23,12 +23,12 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Block (Block(..), sequenceBindings)
+import Language.Lambda.Module (Module(..), sequenceBindings)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer)
 import Language.Lambda.Reduction (class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, rewrite, substitute, unify)
-import Language.Lambda.Unification.Error (class ThrowRecursiveBlockError, class ThrowUnificationError, UnificationError(..), recursiveBlockError, unificationError)
+import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class ThrowUnificationError, UnificationError(..), recursiveModuleError, unificationError)
 import Language.Native (class NativeValue, Native(..))
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParseError)
@@ -42,17 +42,16 @@ type Term = Lambda Var TT
 data TT a =
     Star Int
   | Arrow
-  | Let (Block Var a) a 
+  | Let (Module Var a) a 
   | TypeAnnotation a Term
   | TypeLit Term
-
   | Native (Native Term)
 
 -- a Class is a dictionary of types
---  | Class a (Block Var a) a
+--  | Class a (Module Var a) a
 
 -- an Instance is a dictionary of terms 
---  | Instance a (Block Var a) a
+--  | Instance a (Module Var a) a
 
 -- a TypeConstraint brings a type class dictionary into scope
 --  | TypeConstraint a a
@@ -186,7 +185,7 @@ instance PrettyLambda Var TT where
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat Arrow = text "->"
   prettyCat (Star i) = text (fromCharArray $ replicate i '*')
-  prettyCat (Let (Block bs) a) =
+  prettyCat (Let (Module bs) a) =
     (text "let" <+> prettyBinds)
                 </> (text "in" <+> pretty a)
     where
@@ -283,7 +282,7 @@ instance
   ) => Inference Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
-  inference (Let (Block bs) a) = do
+  inference (Let (Module bs) a) = do
      let bx :: List _
          bx = Map.toUnfoldable bs
      flip traverse_ bx $ \(v /\ _) -> do
@@ -331,7 +330,7 @@ instance
   ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
-  , ThrowRecursiveBlockError Mu Var TT m
+  , ThrowRecursiveModuleError Mu Var TT m
   , NotInScopeError Var m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
@@ -350,7 +349,7 @@ instance
                     pure (v /\ q)
                   _ -> pure (v /\ t)               
          case sequenceBindings bi of
-           Left err -> recursiveBlockError err
+           Left err -> recursiveModuleError err
            Right seq -> do
               flip traverse_ seq $ \(v /\ _) -> do
                  t <- fresh

@@ -6,7 +6,7 @@ import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Data.Traversable (class Traversable)
 import Language.Lambda.Basis (class Basis)
 import Language.Lambda.Calculus (LambdaF(..), abs, var)
-import Language.Lambda.Elimination (elimination)
+import Language.Lambda.Elimination (eliminate)
 import Language.Lambda.Inference (class IsType)
 import Language.Lambda.Unification (class Context, class Fresh, class NotInScopeError, assume, fresh)
 import Matryoshka (AlgebraM, CoalgebraM, hyloM)
@@ -42,7 +42,7 @@ elimReduce :: forall t f var cat m.
          => Proxy t -> f (LambdaF var cat) -> m (f (LambdaF var cat))
 elimReduce p l = tailRecM go l
   where go x = do
-          y <- reduce x >>= elimination p
+          y <- reduce x >>= eliminate p
           if y == x
             then pure $ Done x
             else pure $ Loop y 

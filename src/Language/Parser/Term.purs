@@ -8,20 +8,24 @@ import Control.Lazy (defer)
 import Control.Monad.Cont (lift)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Control.Monad.State (class MonadState)
-import Data.Array (fromFoldable, replicate)
+import Data.Array (fromFoldable, head, replicate)
+import Data.CodePoint.Unicode (isUpper)
 import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
 import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
 import Data.List (List(..), (..), (:))
 import Data.List as List
+import Data.List.NonEmpty (toList)
 import Data.Map as Map
-import Data.String.CodeUnits (fromCharArray)
+import Data.Maybe (Maybe(..))
+import Data.String (codePointFromChar)
+import Data.String.CodeUnits (fromCharArray, toCharArray)
 import Data.Tuple (fst, uncurry)
-import Data.Tuple.Nested ((/\))
+import Data.Tuple.Nested (type (/\), (/\))
 import Effect (Effect)
 import Language.Kernel.Prim (primNatives)
-import Language.Lambda.Block (Block(..))
 import Language.Lambda.Calculus (absMany, app, cat, var)
+import Language.Lambda.Module (Module(..))
 import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
 import Language.Native (Native, native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
@@ -32,7 +36,7 @@ import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos')
 import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
 import Parsing (fail, runParserT)
-import Parsing.Combinators (choice, many1Till, try)
+import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
 import Parsing.String (char, eof)
 import Parsing.Token (GenTokenParser, makeTokenParser)
@@ -61,16 +65,18 @@ derive newtype instance Monad m => Monad (Parser m)
 type TermParser m =
   { parseValue:: Parser m Term
   , parseType :: Parser m Term
-  , parseBlock :: Parser m (Block Var Term)
+  , parseModule :: Parser m (Module Var Term)
   }
 
 data Decl =
     TypeDecl Var Term
   | ValueDecl Var Term
+  | DataDecl Var (List Var) (List (Var /\ List Var))
 
 instance Show Decl where
   show (TypeDecl v t) = prettyPrint v <> " :: " <> prettyPrint t
   show (ValueDecl v t) = prettyPrint v <> " = " <> prettyPrint t
+  show (DataDecl t vs cs) = "data " <> prettyPrint t
 
 parser :: forall names row m.
           Fresh Int m
@@ -81,7 +87,7 @@ parser :: forall names row m.
 parser mod = {
     parseValue: Parser parseValue
   , parseType: Parser parseType
-  , parseBlock: Parser ((try parseBlockB) <|> parseBlockI)
+  , parseModule: Parser ((try parseModuleB) <|> parseModuleI)
   }
   where
     kernel :: Listing (IndentParserT m (Native Term))
@@ -108,33 +114,79 @@ parser mod = {
     parens :: forall a. IndentParserT m a -> IndentParserT m a
     parens = tokenParser.parens
      
-    parseBlockX :: (forall a. IndentParserT m a -> IndentParserT m (List a)) -> IndentParserT m (Block Var Term)
-    parseBlockX f = do
-      ls <- f ((try parseTypeDecl) <|> parseValueDecl)
+    parseModuleX :: (forall a. IndentParserT m a -> IndentParserT m (List a)) -> IndentParserT m (Module Var Term)
+    parseModuleX f = do
+      ls <- f (try parseDataDecl <|> try parseTypeDecl <|> parseValueDecl)
       ds <- tailRecM annotateVals (Nil /\ ls)
-      pure $ Block (Map.fromFoldable ds)
+      pure $ Module (Map.fromFoldable ds)
       where
         annotateVals (d /\ Nil) = pure $ Done d
         annotateVals (d /\ ((ValueDecl v b):r)) = pure $ Loop (((v /\ b):d) /\ r)
         annotateVals (d /\ ((TypeDecl vt t):(ValueDecl vv v):r)) | vt == vv =
            pure $ Loop (((vv /\ (cat $ TypeAnnotation v t)):d) /\ r)
         annotateVals (_ /\ (TypeDecl vt _):r) = fail $ prettyPrint vt <> " type declaration not followed by value declaration. " <> show r
+        annotateVals (d /\ ((DataDecl _ _ _):r)) = pure $ Loop (d /\ r)
         parseTypeDecl = do
-           v <- ((Ident <<< TermVar) <$> identifier) 
+           v <- parseTermVar 
            reservedOp "::"
            b <- parseType
            pure (TypeDecl v b)
         parseValueDecl = do
-           v <- ((Ident <<< TermVar) <$> identifier) 
+           v <- parseTermVar 
            reservedOp "="
            b <- parseValue
            pure (ValueDecl v b)   
+        parseDataDecl = do
+           reserved "data"
+           con <- parseTypeConstructor
+           tvs <- many parseTypeVar
+           reservedOp "="
+           fcon <- parseDataCon
+           dcons <- many (indented *> (reservedOp "|") *> parseDataCon)
+           pure (DataDecl con tvs (fcon:dcons))
+        parseDataCon = do
+           dcon <- parseDataConstructor
+           tvs <- many parseTypeVar
+           pure (dcon /\ tvs)
 
-    parseBlockB :: Monad m => IndentParserT m (Block Var Term)
-    parseBlockB = parseBlockX (map List.fromFoldable <<< tokenParser.braces <<< tokenParser.semiSep1)
 
-    parseBlockI :: Monad m => IndentParserT m (Block Var Term)
-    parseBlockI = parseBlockX block1
+
+    parseTermVar :: Monad m => IndentParserT m Var
+    parseTermVar = do
+      i <- identifier 
+      if Just false == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+        then pure $ Ident $ TermVar i
+        else fail "Term variables must not start with an upper case char"
+
+    parseDataConstructor :: Monad m => IndentParserT m Var
+    parseDataConstructor = do
+      i <- identifier 
+      if Just true == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+        then pure $ Ident $ TermVar i
+        else fail "Data constructors must start with an upper case char"
+
+
+    parseTypeVar :: Monad m => IndentParserT m Var
+    parseTypeVar = do
+      i <- identifier 
+      if Just false == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+        then pure $ Ident $ TypeVar i
+        else fail "Type variables must not start with an upper case char"
+
+    parseTypeConstructor :: Monad m => IndentParserT m Var
+    parseTypeConstructor = do
+      i <- identifier 
+      if Just true == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+        then pure $ Ident $ TypeVar i
+        else fail "Type constructors must start with an upper case char"
+
+
+
+    parseModuleB :: Monad m => IndentParserT m (Module Var Term)
+    parseModuleB = parseModuleX (map List.fromFoldable <<< tokenParser.braces <<< tokenParser.semiSep1)
+
+    parseModuleI :: Monad m => IndentParserT m (Module Var Term)
+    parseModuleI = parseModuleX block1
 
     parseLet :: IndentParserT m Term
     parseLet = (try parseLetB) <|> parseLetI 
@@ -143,7 +195,7 @@ parser mod = {
         parseLetI = do
           b <- withPos' (reserved "let") do
              indented
-             parseBlockI
+             parseModuleI
           reserved "in"
           body <- parseValue
           pure $ cat $ Let b body
@@ -151,7 +203,7 @@ parser mod = {
         parseLetB :: IndentParserT m Term
         parseLetB = do
           reserved "let"
-          b <- parseBlockB
+          b <- parseModuleB
           reserved "in"
           body <- parseValue
           pure $ cat $ Let b body
@@ -160,7 +212,7 @@ parser mod = {
     parseValue = indented *> (buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom)) 
     
     parseValueAtom :: IndentParserT m Term
-    parseValueAtom = defer $ \_ -> indented *> (parseAbs <|> parseNatives <|> ((var <<< Ident <<< TermVar) <$> identifier) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
+    parseValueAtom = defer $ \_ -> indented *> (parseAbs <|> parseNatives <|> (var <$> parseTermVar) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
  
     
     parseTypeLit :: IndentParserT m Term
@@ -211,7 +263,7 @@ parser mod = {
     parseType = indented *> (buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom) 
     
     parseTypeAtom :: IndentParserT m Term
-    parseTypeAtom = defer $ \_ -> indented *> (parseTypeAbs <|> ((var <<< Ident <<< TypeVar) <$> identifier) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType))
+    parseTypeAtom = defer $ \_ -> indented *> (parseTypeAbs <|> (try (var <$> parseTypeVar) <|> (var <$> parseTypeConstructor)) <|> parseStar <|> parseTypeInt <|> parseTypeNumber <|> parseTypeEffect <|> (parens parseType))
     
     parseTypeInt ::  IndentParserT m Term
     parseTypeInt = reserved "Int" *> pure (reify (Proxy :: Proxy Int))
@@ -222,6 +274,7 @@ parser mod = {
     parseTypeEffect ::  IndentParserT m Term
     parseTypeEffect = reserved "Effect" *> pure (reify (Proxy :: Proxy Effect))
     
+
     
     parseTypeArrow :: Term -> IndentParserT m Term
     parseTypeArrow a = do

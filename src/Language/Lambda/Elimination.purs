@@ -1,4 +1,4 @@
-module Language.Lambda.Elimination (elimination) where
+module Language.Lambda.Elimination (eliminate) where
 
 -- https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis
 
@@ -15,20 +15,20 @@ import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Type.Proxy (Proxy)
 
-elimination :: forall f var cat t m.
-               Recursive (f (LambdaF var cat)) (LambdaF var cat) 
-            => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
-            => Ord var
-            => Traversable cat
-            => Functor cat
-            => Basis t m f var cat
-            => MonadRec m
-            => IsType (f (LambdaF var cat))
-            => Eq (f (LambdaF var cat))
-            => Proxy t
-            -> f (LambdaF var cat)
-            -> m (f (LambdaF var cat))
-elimination p = hyloM catamorphism anamorphism 
+eliminate :: forall f var cat t m.
+             Recursive (f (LambdaF var cat)) (LambdaF var cat) 
+          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
+          => Ord var
+          => Traversable cat
+          => Functor cat
+          => Basis t m f var cat
+          => MonadRec m
+          => IsType (f (LambdaF var cat))
+          => Eq (f (LambdaF var cat))
+          => Proxy t
+          -> f (LambdaF var cat)
+          -> m (f (LambdaF var cat))
+eliminate p = hyloM catamorphism anamorphism 
   where
     anamorphism :: CoalgebraM m (EliminationAlgebra var cat) (f (LambdaF var cat))
     anamorphism l =

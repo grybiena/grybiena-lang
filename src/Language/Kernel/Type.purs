@@ -9,7 +9,6 @@ import Prim (String, Int, Record)
 data Type =
     TypeApp Type Type
   | TypeConstructor String
-  | Bottom String
 
 
 instance Eq Type where
@@ -20,7 +19,6 @@ instance Eq Type where
 instance Pretty Type where
   pretty (TypeApp a b) = pretty a <+> pretty b 
   pretty (TypeConstructor c) = text c
-  pretty (Bottom s) = text "Error:" <+> text s
 
 primitiveTypeConstructors :: Record 
   ( "Int" :: Type
@@ -28,6 +26,7 @@ primitiveTypeConstructors :: Record
   , "Boolean" :: Type
   , "Effect" :: Type -> Type
   , "Maybe" :: Type -> Type
+  , "Array" :: Type -> Type
   )
 primitiveTypeConstructors = 
   { "Int": TypeConstructor "Int"
@@ -35,5 +34,6 @@ primitiveTypeConstructors =
   , "Boolean": TypeConstructor "Boolean"
   , "Effect": TypeApp (TypeConstructor "Effect")
   , "Maybe": TypeApp (TypeConstructor "Maybe")
+  , "Array": TypeApp (TypeConstructor "Array")
   }
 
