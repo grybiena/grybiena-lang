@@ -12,7 +12,8 @@ import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
-import Data.String (Pattern(..), split)
+import Data.String (split)
+import Data.String as String
 import Data.Traversable (sequence_, traverse)
 import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
@@ -52,7 +53,7 @@ instance Show CompileTest where
 
 findCompileTests :: String -> Array String -> Array CompileTest
 findCompileTests dir a =
-  let z = split (Pattern ".") <$> a
+  let z = split (String.Pattern ".") <$> a
       x = nub $ catMaybes ((\l -> l!!0) <$> z)
       f o = 
         let te = o <> ".term"

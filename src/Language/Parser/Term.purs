@@ -20,7 +20,7 @@ import Data.Maybe (Maybe(..))
 import Data.String (codePointFromChar)
 import Data.String.CodeUnits (fromCharArray, toCharArray)
 import Data.Tuple (Tuple(..), fst, uncurry)
-import Data.Tuple.Nested (type (/\), (/\))
+import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
@@ -73,23 +73,23 @@ type TermParser m =
 data Decl =
     TypeDecl Var Term
   | ValueDecl Var Term
-  | DataDecl DataTypeConstructor (List DataValueConstructor)
+  | DataDecl DataTypeDecl (List DataValueDecl)
 
-data DataTypeConstructor = DataTypeConstructor Var (List Var)
-data DataValueConstructor = DataValueConstructor String (List Var)
+data DataTypeDecl = DataTypeDecl Var (List Var)
+data DataValueDecl = DataValueDecl String (List Var)
 
-dataConstructors :: DataTypeConstructor -> List DataValueConstructor -> List Decl
-dataConstructors (DataTypeConstructor tycon tyvars) = tailRec go <<< Tuple Nil
+dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
+dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
   where
     dataType :: Term
     dataType = appMany (var tycon) (var <$> tyvars) 
     go (ds /\ Nil) = Done ds
-    go (ds /\ (DataValueConstructor c ts):r) =
+    go (ds /\ (DataValueDecl c ts):r) =
       let constructorType :: Term
           constructorType = arrMany (var <$> ts) dataType 
           nativeType :: Term
           nativeType = absMany tyvars constructorType 
-          nativeTerm :: Data
+          nativeTerm :: Data Term
           nativeTerm = DataConstructor c
           native :: Native Term
           native = Purescript { nativeType, nativeTerm: unsafeCoerce nativeTerm, nativePretty: c } 
@@ -100,7 +100,7 @@ dataConstructors (DataTypeConstructor tycon tyvars) = tailRec go <<< Tuple Nil
 instance Show Decl where
   show (TypeDecl v t) = prettyPrint v <> " :: " <> prettyPrint t
   show (ValueDecl v t) = prettyPrint v <> " = " <> prettyPrint t
-  show (DataDecl (DataTypeConstructor t vs) cs) = "data " <> prettyPrint t
+  show (DataDecl (DataTypeDecl t vs) cs) = "data " <> prettyPrint t
 
 parser :: forall names row m.
           Fresh Int m
@@ -161,19 +161,19 @@ parser mod = {
            b <- parseValue
            pure (ValueDecl v b)   
         parseDataDecl = withPos' (reserved "data") do
-           dtc <- parseDataTypeConstructor
+           dtc <- parseDataTypeDecl
            reservedOp "="
-           fcon <- withPos parseDataValueConstructor
-           dcons <- many (indented *> (reservedOp "|") *> withPos parseDataValueConstructor)
+           fcon <- withPos parseDataValueDecl
+           dcons <- many (indented *> (reservedOp "|") *> withPos parseDataValueDecl)
            pure (DataDecl dtc (fcon:dcons))
-        parseDataTypeConstructor = do
+        parseDataTypeDecl = do
            con <- parseTypeConstructor
            tvs <- many parseTypeVar
-           pure (DataTypeConstructor con tvs)
-        parseDataValueConstructor = do
+           pure (DataTypeDecl con tvs)
+        parseDataValueDecl = do
            dcon <- parseDataConstructor'
            tvs <- many (indented *> parseTypeVar)
-           pure $ DataValueConstructor dcon tvs
+           pure $ DataValueDecl dcon tvs
 
 
 

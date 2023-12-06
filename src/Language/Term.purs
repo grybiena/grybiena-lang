@@ -23,11 +23,11 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Module (Module(..), sequenceBindings)
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer)
+import Language.Lambda.Module (Module(..), sequenceBindings)
 import Language.Lambda.Reduction (class Composition, class Reduction)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, rewrite, substitute, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, require, rewrite, substitute, unify)
 import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class ThrowUnificationError, UnificationError(..), recursiveModuleError, unificationError)
 import Language.Native (class NativeValue, Native(..))
 import Matryoshka.Class.Recursive (project)
@@ -46,6 +46,8 @@ data TT a =
   | TypeAnnotation a Term
   | TypeLit Term
   | Native (Native Term)
+  | Pattern String
+
 
 -- a Class is a dictionary of types
 --  | Class a (Module Var a) a
@@ -79,6 +81,7 @@ instance Functor TT where
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (TypeLit t) = TypeLit t
   map _ (Native n) = Native n 
+  map _ (Pattern p) = Pattern p
 
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
@@ -87,6 +90,7 @@ instance Traversable TT where
   traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> f a
   traverse _ (TypeLit t) = pure $ TypeLit t
   traverse _ (Native n) = pure $ Native n 
+  traverse _ (Pattern p) = pure $ Pattern p
   sequence = traverse identity
 
 instance Skolemize Mu Var TT where
@@ -107,18 +111,21 @@ instance Foldable TT where
   foldr f b (TypeAnnotation a _) = f a b
   foldr _ b (TypeLit _) = b
   foldr _ b (Native _) = b
+  foldr _ b (Pattern _) = b
   foldl _ b (Star _) = b
   foldl _ b Arrow = b
   foldl f b (Let bs bd) = f (foldl f b bs) bd
   foldl f b (TypeAnnotation a _) = f b a
   foldl _ b (TypeLit _) = b
   foldl _ b (Native _) = b
+  foldl _ b (Pattern _) = b
   foldMap _ (Star _) = mempty
   foldMap _ Arrow = mempty
   foldMap f (Let bs b) = foldMap f bs <> f b
   foldMap f (TypeAnnotation a _) = f a
   foldMap _ (TypeLit _) = mempty
   foldMap _ (Native _) = mempty
+  foldMap _ (Pattern _) = mempty
 
 newtype Scope = Scope Int
 derive newtype instance Show Scope
@@ -195,6 +202,7 @@ instance PrettyLambda Var TT where
   prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
   prettyCat (TypeLit a) = text "@" <> pretty a
   prettyCat (Native (Purescript { nativePretty })) = text nativePretty
+  prettyCat (Pattern p) = text p
 
 
 
@@ -299,6 +307,8 @@ instance
     pure (vt' :< tail vt)
   inference (TypeLit t) = infer t 
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
+  inference (Pattern p) = require (Ident $ TermVar p) >>= \t -> pure (t :< Cat (Pattern p))
+ 
 
 instance
   ( Monad m
