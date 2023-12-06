@@ -3,7 +3,7 @@ module Language.Lambda.Inference where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
-import Data.Foldable (class Foldable)
+import Data.Foldable (class Foldable, foldr)
 import Data.List (List)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested ((/\))
@@ -149,6 +149,14 @@ class Arrow typ where
   arrow :: typ -> typ -> typ
 
 infixr 5 arrow as :->:
+
+
+arrMany :: forall typ f.
+           Foldable f
+        => Functor f
+        => Arrow typ
+        => f typ -> typ -> typ
+arrMany args = flip (foldr ($)) (arrow <$> args)
 
 class ArrowObject cat where
   arrowObject :: cat 

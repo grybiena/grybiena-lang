@@ -5,7 +5,19 @@
          j = if intGt (x 5 6) 0
              then 1
              else (-1)
+
+         z :: Foo Int
+         z = Baz 1
+
+         q :: forall a. a -> Foo a
+         q = Baz
+
          data Foo a =
              Bar
            | Baz a
+
+         r :: forall a. Foo a
+         r = Bar
+
+
        in x j i) intPlus
