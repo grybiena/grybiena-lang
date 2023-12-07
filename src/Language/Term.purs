@@ -15,9 +15,10 @@ import Data.Foldable (class Foldable, foldMap, foldl, foldr, sequence_)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
 import Data.List (List)
+import Data.List as List
 import Data.List.NonEmpty (NonEmptyList, foldM, zipWith)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), maybe)
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
@@ -33,7 +34,7 @@ import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class
 import Language.Native (class NativeValue, Native(..))
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParseError)
-import Prettier.Printer (stack, text, (<+>), (</>))
+import Prettier.Printer (beside, stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
 import Prim (Array, Boolean, Int, Number, Record, String)
 
@@ -238,7 +239,11 @@ instance PrettyLambda Var TT where
   prettyCat (TypeLit a) = text "@" <> pretty a
   prettyCat (Native (Purescript { nativePretty })) = text nativePretty
   prettyCat (Pattern p) = text p
-  prettyCat (Case a e) = text "TODO: prettyCat Case"
+  prettyCat (Case a e) = text "case" <+> foldl beside mempty (pretty <$> a) <+> text "of"
+                      </> stack (prettyAlt <$> List.fromFoldable e)
+    where prettyAlt (CaseAlternative { patterns, guard, body }) =
+            foldl beside mempty (pretty <$> patterns) <+> prettyGuard guard <+> text "=>" <+> pretty body
+          prettyGuard = maybe mempty (\g -> text "|" <+> pretty g)
 
 
 
