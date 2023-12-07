@@ -277,16 +277,17 @@ parser mod = {
     parseCaseExpr :: Monad m => IndentParserT m Term
     parseCaseExpr = do
       withPos' (reserved "case") do
-        pats <- many1 parseValue
+        exp <- parseValue
         reserved "of"
         alts <- block1 parseCaseAlternative
-        pure $ cat (Case pats alts) 
+        pure $ cat (Case exp alts) 
 
     parseCaseAlternative :: Monad m => IndentParserT m (CaseAlternative Term)
     parseCaseAlternative = do
-       patterns <- many1Till parsePattern (reservedOp "=>")
+       pattern <- parsePattern
+       reservedOp "=>"
        body <- parseValue
-       pure $ CaseAlternative { patterns, guard: Nothing, body }
+       pure $ CaseAlternative { pattern, guard: Nothing, body }
 
 
     
