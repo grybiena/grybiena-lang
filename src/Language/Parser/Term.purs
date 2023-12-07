@@ -8,8 +8,9 @@ import Control.Lazy (defer)
 import Control.Monad.Cont (lift)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRec, tailRecM)
 import Control.Monad.State (class MonadState)
-import Data.Array (fromFoldable, head, replicate)
+import Data.Array (fromFoldable, head, intersperse, replicate)
 import Data.CodePoint.Unicode (isUpper)
+import Data.Foldable (foldl)
 import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
 import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
@@ -22,13 +23,12 @@ import Data.String.CodeUnits (fromCharArray, toCharArray)
 import Data.Tuple (Tuple(..), fst, uncurry)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
 import Language.Lambda.Calculus (absMany, app, appMany, cat, var)
 import Language.Lambda.Inference (arrMany)
 import Language.Lambda.Module (Module(..))
 import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
-import Language.Native (Native(..), native)
+import Language.Native (Native, native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
 import Language.Native.Reify (nativeTerm, reify)
 import Language.Native.Unsafe (unsafeModule)
@@ -41,9 +41,9 @@ import Parsing.Combinators (choice, many, many1Till, try)
 import Parsing.Expr (buildExprParser)
 import Parsing.String (char, eof)
 import Parsing.Token (GenTokenParser, makeTokenParser)
-import Pretty.Printer (prettyPrint)
+import Prettier.Printer (beside, text, (<+>))
+import Pretty.Printer (pretty, prettyPrint)
 import Type.Proxy (Proxy(..))
-import Unsafe.Coerce (unsafeCoerce)
 
 instance
   ( Fresh Int m
@@ -87,20 +87,20 @@ dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
     go (ds /\ (DataValueDecl c ts):r) =
       let constructorType :: Term
           constructorType = arrMany (var <$> ts) dataType 
-          nativeType :: Term
-          nativeType = absMany tyvars constructorType 
-          nativeTerm :: Data Term
-          nativeTerm = DataConstructor c
-          native :: Native Term
-          native = Purescript { nativeType, nativeTerm: unsafeCoerce nativeTerm, nativePretty: c } 
-          decl :: Decl 
-          decl = ValueDecl (Ident $ TermVar c) (cat (Native native))
-       in Loop ((decl:ds) /\ r)
+          typeDecl :: Decl
+          typeDecl = TypeDecl (Ident $ TermVar c) (absMany tyvars constructorType)
+          valDecl :: Decl 
+          valDecl = ValueDecl (Ident $ TermVar c) (cat (Pattern c))
+       in Loop ((typeDecl:valDecl:ds) /\ r)
 
 instance Show Decl where
   show (TypeDecl v t) = prettyPrint v <> " :: " <> prettyPrint t
   show (ValueDecl v t) = prettyPrint v <> " = " <> prettyPrint t
-  show (DataDecl (DataTypeDecl t vs) cs) = "data " <> prettyPrint t
+  show (DataDecl (DataTypeDecl t vs) cs) =
+    let prettyCon (DataValueDecl s v) = foldl beside (text s) (pretty <$> v)
+     in prettyPrint $ text "data" <+> foldl beside (pretty t) (pretty <$> vs)
+                                  <+> text "="
+                                  <+> foldl beside (text "") (intersperse (text "|") (fromFoldable $ prettyCon <$> cs))
 
 parser :: forall names row m.
           Fresh Int m

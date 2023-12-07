@@ -11,20 +11,21 @@ import Data.Array (replicate)
 import Data.Either (Either(..))
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
-import Data.Foldable (class Foldable, foldMap, foldl, foldr)
+import Data.Foldable (class Foldable, foldMap, foldl, foldr, sequence_)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
 import Data.List (List)
+import Data.List.NonEmpty (NonEmptyList, foldM, zipWith)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
-import Data.Traversable (class Traversable, traverse, traverse_)
+import Data.Traversable (class Traversable, sequence, traverse, traverse_)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer)
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrMany, arrow, infer)
 import Language.Lambda.Module (Module(..), sequenceBindings)
 import Language.Lambda.Reduction (class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, require, rewrite, substitute, unify)
@@ -39,6 +40,34 @@ import Prim (Array, Boolean, Int, Number, Record, String)
 type Term = Lambda Var TT
 
 
+newtype CaseAlternative a
+  = CaseAlternative {
+      binders :: NonEmptyList a
+    , guard :: Maybe a 
+    , result :: a
+    }
+
+derive newtype instance Eq a => Eq (CaseAlternative a)
+
+instance Functor CaseAlternative where
+  map f (CaseAlternative a) = CaseAlternative { binders: map f a.binders, guard: map f a.guard, result: f a.result }
+
+instance Foldable CaseAlternative where
+  foldr f b (CaseAlternative a) = f a.result (foldr f (foldr f b a.binders) a.guard)
+  foldl f b (CaseAlternative a) = f (foldl f (foldl f b a.binders) a.guard) a.result
+  foldMap f (CaseAlternative a) = foldMap f a.binders <> foldMap f a.guard <> f a.result
+ 
+instance Traversable CaseAlternative where
+  traverse f (CaseAlternative a) =
+    (\binders guard result -> CaseAlternative { binders, guard, result })
+      <$> traverse f a.binders
+      <*> traverse f a.guard
+      <*> f a.result
+  sequence = traverse identity
+
+instance Show (CaseAlternative a) where
+  show _ = "TODO: show CaseAlternative"
+
 data TT a =
     Star Int
   | Arrow
@@ -47,6 +76,7 @@ data TT a =
   | TypeLit Term
   | Native (Native Term)
   | Pattern String
+  | Case (NonEmptyList a) (NonEmptyList (CaseAlternative a)) 
 
 
 -- a Class is a dictionary of types
@@ -82,6 +112,7 @@ instance Functor TT where
   map _ (TypeLit t) = TypeLit t
   map _ (Native n) = Native n 
   map _ (Pattern p) = Pattern p
+  map f (Case a e) = Case (map f a) (map f <$> e)
 
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
@@ -91,6 +122,7 @@ instance Traversable TT where
   traverse _ (TypeLit t) = pure $ TypeLit t
   traverse _ (Native n) = pure $ Native n 
   traverse _ (Pattern p) = pure $ Pattern p
+  traverse f (Case o b) = Case <$> traverse f o <*> traverse (traverse f) b
   sequence = traverse identity
 
 instance Skolemize Mu Var TT where
@@ -112,6 +144,7 @@ instance Foldable TT where
   foldr _ b (TypeLit _) = b
   foldr _ b (Native _) = b
   foldr _ b (Pattern _) = b
+  foldr f b (Case a e) = foldl (foldr f) (foldr f b a) e
   foldl _ b (Star _) = b
   foldl _ b Arrow = b
   foldl f b (Let bs bd) = f (foldl f b bs) bd
@@ -119,6 +152,7 @@ instance Foldable TT where
   foldl _ b (TypeLit _) = b
   foldl _ b (Native _) = b
   foldl _ b (Pattern _) = b
+  foldl f b (Case a e) = foldl (foldl f) (foldl f b a) e
   foldMap _ (Star _) = mempty
   foldMap _ Arrow = mempty
   foldMap f (Let bs b) = foldMap f bs <> f b
@@ -126,6 +160,7 @@ instance Foldable TT where
   foldMap _ (TypeLit _) = mempty
   foldMap _ (Native _) = mempty
   foldMap _ (Pattern _) = mempty
+  foldMap f (Case a e) = foldMap f a <> foldMap (foldMap f) e
 
 newtype Scope = Scope Int
 derive newtype instance Show Scope
@@ -203,6 +238,7 @@ instance PrettyLambda Var TT where
   prettyCat (TypeLit a) = text "@" <> pretty a
   prettyCat (Native (Purescript { nativePretty })) = text nativePretty
   prettyCat (Pattern p) = text p
+  prettyCat (Case a e) = text "TODO: prettyCat Case"
 
 
 
@@ -299,7 +335,9 @@ instance
      traverse_ (\(v /\ t) -> do
         t' <- t
         assume v (head t')) bx
-     a
+     bz <- sequence bs
+     t <- a
+     pure $ head t :< Cat (Let (Module bz) t)
   inference (TypeAnnotation v t) = do
     (vt :: Cofree (LambdaF Var TT) Term) <- v
     unify (head vt :: Term) t
@@ -307,6 +345,31 @@ instance
     pure (vt' :< tail vt)
   inference (TypeLit t) = infer t 
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
+  inference (Case args branches) = do
+    -- TODO check all branches have the same number of patterns as the args in the case
+    -- TODO check all the guards are of type Boolean
+    typedArgs <- sequence args
+    let typeBranch (CaseAlternative a) = do
+           binders <- sequence a.binders
+           guard <- sequence a.guard
+           result <- a.result
+           pure $ CaseAlternative { binders, guard, result } 
+    typedBranches <- traverse typeBranch branches
+    let argTys = head <$> typedArgs 
+        unifyBinder arg = join <<< map (unify arg <<< head)
+        unifyBinders (CaseAlternative { binders }) = do
+           sequence_ (zipWith unifyBinder argTys binders)             
+        body (CaseAlternative { result }) = result
+    traverse_ unifyBinders branches
+    bodies <- map head <$> sequence (body <$> branches)
+    (t :: Term) <- fresh 
+    let unifyAll a b = do
+          unify a b
+          rewrite a
+    argTys' <- traverse rewrite argTys
+    tbody <- foldM unifyAll t bodies
+    let caseTy = arrMany argTys' tbody
+    pure $ caseTy :< (Cat (Case typedArgs typedBranches))
   inference (Pattern p) = require (Ident $ TermVar p) >>= \t -> pure (t :< Cat (Pattern p))
  
 
