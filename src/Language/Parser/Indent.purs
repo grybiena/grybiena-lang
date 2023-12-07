@@ -43,7 +43,7 @@ import Data.List (List(..), many)
 import Data.List.NonEmpty (NonEmptyList)
 import Data.Maybe (Maybe(..))
 import Parsing (ParserT, fail, position, Position(..), initialPos)
-import Parsing.Combinators (many1Till, option, optionMaybe)
+import Parsing.Combinators (many1,many1Till, option, optionMaybe)
 import Parsing.String (string)
 import Parsing.String.Basic (oneOf)
 
@@ -74,9 +74,6 @@ getIndentLevel = do
 
 putIndentLevel :: forall m. Monad m => Position -> IndentParserT m Unit
 putIndentLevel p = lift (Positioned (modify_ (\pos -> pos { position = p })))
-
-many1 :: forall s m a. ParserT s m a -> ParserT s m (List a)
-many1 p = lift2 Cons p (many p)
 
 symbol :: forall m. String -> ParserT String m String
 symbol name = (many $ oneOf [ ' ', '\t' ]) *> (string name)
@@ -146,7 +143,7 @@ block p = withPos $ do
 
 
 -- | Parses a block of lines at the same indentation level
-block1 :: forall m a. Monad m => IndentParserT m a -> IndentParserT m (List a)
+block1 :: forall m a. Monad m => IndentParserT m a -> IndentParserT m (NonEmptyList a)
 block1 p = withPos $ do
   r <- many1 $ checkIndent *> p
   pure r

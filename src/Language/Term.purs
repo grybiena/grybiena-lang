@@ -42,27 +42,27 @@ type Term = Lambda Var TT
 
 newtype CaseAlternative a
   = CaseAlternative {
-      binders :: NonEmptyList a
+      patterns :: NonEmptyList a
     , guard :: Maybe a 
-    , result :: a
+    , body :: a
     }
 
 derive newtype instance Eq a => Eq (CaseAlternative a)
 
 instance Functor CaseAlternative where
-  map f (CaseAlternative a) = CaseAlternative { binders: map f a.binders, guard: map f a.guard, result: f a.result }
+  map f (CaseAlternative a) = CaseAlternative { patterns: map f a.patterns, guard: map f a.guard, body: f a.body }
 
 instance Foldable CaseAlternative where
-  foldr f b (CaseAlternative a) = f a.result (foldr f (foldr f b a.binders) a.guard)
-  foldl f b (CaseAlternative a) = f (foldl f (foldl f b a.binders) a.guard) a.result
-  foldMap f (CaseAlternative a) = foldMap f a.binders <> foldMap f a.guard <> f a.result
+  foldr f b (CaseAlternative a) = f a.body (foldr f (foldr f b a.patterns) a.guard)
+  foldl f b (CaseAlternative a) = f (foldl f (foldl f b a.patterns) a.guard) a.body
+  foldMap f (CaseAlternative a) = foldMap f a.patterns <> foldMap f a.guard <> f a.body
  
 instance Traversable CaseAlternative where
   traverse f (CaseAlternative a) =
-    (\binders guard result -> CaseAlternative { binders, guard, result })
-      <$> traverse f a.binders
+    (\patterns guard body -> CaseAlternative { patterns, guard, body })
+      <$> traverse f a.patterns
       <*> traverse f a.guard
-      <*> f a.result
+      <*> f a.body
   sequence = traverse identity
 
 instance Show (CaseAlternative a) where
@@ -350,18 +350,18 @@ instance
     -- TODO check all the guards are of type Boolean
     typedArgs <- sequence args
     let typeBranch (CaseAlternative a) = do
-           binders <- sequence a.binders
+           patterns <- sequence a.patterns
            guard <- sequence a.guard
-           result <- a.result
-           pure $ CaseAlternative { binders, guard, result } 
+           body <- a.body
+           pure $ CaseAlternative { patterns, guard, body } 
     typedBranches <- traverse typeBranch branches
     let argTys = head <$> typedArgs 
         unifyBinder arg = join <<< map (unify arg <<< head)
-        unifyBinders (CaseAlternative { binders }) = do
-           sequence_ (zipWith unifyBinder argTys binders)             
-        body (CaseAlternative { result }) = result
+        unifyBinders (CaseAlternative { patterns }) = do
+           sequence_ (zipWith unifyBinder argTys patterns)             
+        getBody (CaseAlternative { body }) = body
     traverse_ unifyBinders branches
-    bodies <- map head <$> sequence (body <$> branches)
+    bodies <- map head <$> sequence (getBody <$> branches)
     (t :: Term) <- fresh 
     let unifyAll a b = do
           unify a b

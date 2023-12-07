@@ -32,7 +32,7 @@ languageDef extraReservedNames = LanguageDef
   op' :: ParserT String m Char
   op' = oneOf [ ':', '!', '#', '$', '%', '&', '*', '+', '.', '/', '<', '=', '>', '?', '@', '\\', '^', '|', '-', '~' ]
   reservedOpNames =  [ "=", "::", ",", ".", "\\", "->"]
-  reservedNames = [ "forall", "let", "in", "if", "then", "else", "type", "data", "String", "Int", "Number", "Effect" ] <> extraReservedNames
+  reservedNames = [ "forall", "let", "in", "if", "then", "else", "case", "of", "type", "data", "String", "Int", "Number", "Effect" ] <> extraReservedNames
 
  
 

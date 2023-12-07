@@ -16,8 +16,10 @@ import Data.Homogeneous (class ToHomogeneousRow)
 import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
 import Data.List (List(..), (..), (:))
 import Data.List as List
+import Data.List.NonEmpty (NonEmptyList)
+import Data.List.NonEmpty as NonEmptyList
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), maybe)
 import Data.String (codePointFromChar)
 import Data.String.CodeUnits (fromCharArray, toCharArray)
 import Data.Tuple (Tuple(..), fst, uncurry)
@@ -35,9 +37,9 @@ import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos, withPos')
-import Language.Term (Ident(..), Scope(..), TT(..), Term, Var(..))
+import Language.Term (CaseAlternative(..), Ident(..), Scope(..), TT(..), Term, Var(..))
 import Parsing (fail, runParserT)
-import Parsing.Combinators (choice, many, many1Till, try)
+import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
 import Parsing.String (char, eof)
 import Parsing.Token (GenTokenParser, makeTokenParser)
@@ -138,9 +140,10 @@ parser mod = {
     parens :: forall a. IndentParserT m a -> IndentParserT m a
     parens = tokenParser.parens
      
-    parseModuleX :: (forall a. IndentParserT m a -> IndentParserT m (List a)) -> IndentParserT m (Module Var Term)
+    parseModuleX :: (forall a. IndentParserT m a -> IndentParserT m (NonEmptyList a))
+                 -> IndentParserT m (Module Var Term)
     parseModuleX f = do
-      ls <- f (try parseDataDecl <|> try parseTypeDecl <|> parseValueDecl)
+      ls <- List.fromFoldable <$> f (try parseDataDecl <|> try parseTypeDecl <|> parseValueDecl)
       ds <- tailRecM annotateVals (Nil /\ ls)
       pure $ Module (Map.fromFoldable ds)
       where
@@ -214,7 +217,8 @@ parser mod = {
 
 
     parseModuleB :: Monad m => IndentParserT m (Module Var Term)
-    parseModuleB = parseModuleX (map List.fromFoldable <<< tokenParser.braces <<< tokenParser.semiSep1)
+    parseModuleB = parseModuleX ((map NonEmptyList.fromFoldable <<< tokenParser.braces <<< tokenParser.semiSep1)
+                                >=> maybe (fail "Empty module.") pure)
 
     parseModuleI :: Monad m => IndentParserT m (Module Var Term)
     parseModuleI = parseModuleX block1
@@ -243,7 +247,13 @@ parser mod = {
     parseValue = indented *> (buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom)) 
     
     parseValueAtom :: IndentParserT m Term
-    parseValueAtom = defer $ \_ -> indented *> (parseAbs <|> parseNatives <|> (try (var <$> parseTermVar) <|> var <$> parseDataConstructor) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
+    parseValueAtom = defer $ \_ -> indented *> (parseCaseExpr <|> parseAbs <|> parseNatives <|> (try (var <$> parseTermVar) <|> var <$> parseDataConstructor) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
+ 
+    parsePattern :: Monad m => IndentParserT m Term
+    parsePattern = (buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parsePatternAtom)) 
+ 
+    parsePatternAtom :: IndentParserT m Term
+    parsePatternAtom = defer $ \_ -> ((try (var <$> parseTermVar) <|> var <$> parseDataConstructor) <|> parseNumeric <|> (parens parsePattern))
  
     
     parseTypeLit :: IndentParserT m Term
@@ -264,6 +274,22 @@ parser mod = {
     parseNumber ::  IndentParserT m Term
     parseNumber = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> number 
 
+    parseCaseExpr :: Monad m => IndentParserT m Term
+    parseCaseExpr = do
+      withPos' (reserved "case") do
+        pats <- many1 parseValue
+        reserved "of"
+        alts <- block1 parseCaseAlternative
+        pure $ cat (Case pats alts) 
+
+    parseCaseAlternative :: Monad m => IndentParserT m (CaseAlternative Term)
+    parseCaseAlternative = do
+       patterns <- many1Till parsePattern (reservedOp "=>")
+       body <- parseValue
+       pure $ CaseAlternative { patterns, guard: Nothing, body }
+
+
+    
     parseIfElse :: IndentParserT m Term
     parseIfElse = do
       reserved "if"
