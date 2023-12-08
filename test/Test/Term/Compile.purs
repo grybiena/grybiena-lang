@@ -2,6 +2,7 @@ module Test.Term.Compile where
 
 import Prelude
 
+import Control.Comonad.Cofree (head)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
@@ -20,6 +21,7 @@ import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Language.Lambda.Calculus (LambdaF(..))
+import Language.Lambda.Inference (flat, infer)
 import Language.Lambda.Reduction (elimReduce)
 import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
 import Language.Lambda.Unification.Error (UnificationError)
@@ -101,7 +103,9 @@ compiles s e = do
       Right (val /\ typ) -> do
         let compileFix v = do
               let p = (Proxy :: Proxy Parser)
-              q <- runExceptT $ runExceptT $ elimReduce p v
+              q <- runExceptT do
+--                 i <- flat <$> infer v
+                 runExceptT $ elimReduce p v
               case q of
                 Left err -> throwError $ UnifError err 
                 Right (Left err) -> throwError $ ParseError err

@@ -25,6 +25,7 @@ import Data.String.CodeUnits (fromCharArray, toCharArray)
 import Data.Tuple (Tuple(..), fst, uncurry)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
+import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
 import Language.Lambda.Calculus (absMany, app, appMany, cat, var)
 import Language.Lambda.Inference (arrMany)
@@ -88,11 +89,11 @@ dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
     go (ds /\ Nil) = Done ds
     go (ds /\ (DataValueDecl c ts):r) =
       let constructorType :: Term
-          constructorType = arrMany (var <$> ts) dataType 
+          constructorType = absMany tyvars (arrMany (var <$> ts) dataType) 
           typeDecl :: Decl
-          typeDecl = TypeDecl (Ident $ TermVar c) (absMany tyvars constructorType)
+          typeDecl = TypeDecl (Ident $ TermVar c) constructorType
           valDecl :: Decl 
-          valDecl = ValueDecl (Ident $ TermVar c) (cat (Pattern c))
+          valDecl = ValueDecl (Ident $ TermVar c) (cat (Data (DataConstructor c constructorType)))
        in Loop ((typeDecl:valDecl:ds) /\ r)
 
 instance Show Decl where
@@ -277,17 +278,16 @@ parser mod = {
     parseCaseExpr :: Monad m => IndentParserT m Term
     parseCaseExpr = do
       withPos' (reserved "case") do
-        exp <- parseValue
+        exps <- many1 parseValue
         reserved "of"
         alts <- block1 parseCaseAlternative
-        pure $ cat (Case exp alts) 
+        pure $ cat (Case exps alts) 
 
     parseCaseAlternative :: Monad m => IndentParserT m (CaseAlternative Term)
     parseCaseAlternative = do
-       pattern <- parsePattern
-       reservedOp "=>"
+       patterns <- many1Till parsePattern (reservedOp "=>")
        body <- parseValue
-       pure $ CaseAlternative { pattern, guard: Nothing, body }
+       pure $ CaseAlternative { patterns, guard: Nothing, body }
 
 
     

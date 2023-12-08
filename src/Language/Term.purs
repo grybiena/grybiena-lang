@@ -11,22 +11,24 @@ import Data.Array (replicate)
 import Data.Either (Either(..))
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
-import Data.Foldable (class Foldable, foldMap, foldl, foldr)
+import Data.Foldable (class Foldable, foldMap, foldl, foldr, sequence_)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.List (List)
+import Data.List (List(..))
 import Data.List as List
-import Data.List.NonEmpty (NonEmptyList, foldM)
+import Data.List.NonEmpty (NonEmptyList(..), foldM, zipWith)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), maybe)
+import Data.NonEmpty (NonEmpty(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
-import Data.Tuple (uncurry)
+import Data.Tuple (fst, snd, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, prettyVar, replaceFree, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrow, infer)
+import Language.Kernel.Data (Data(..))
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), absMany, app, appMany, cat, free, prettyVar, replaceFree, var)
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrMany, arrow, infer)
 import Language.Lambda.Module (Module(..), sequenceBindings)
 import Language.Lambda.Reduction (class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, require, rewrite, substitute, unify)
@@ -34,16 +36,17 @@ import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class
 import Language.Native (class NativeValue, Native(..))
 import Matryoshka.Class.Recursive (project)
 import Parsing (ParseError)
-import Prettier.Printer (stack, text, (<+>), (</>))
+import Prettier.Printer (beside, stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
 import Prim (Array, Boolean, Int, Number, Record, String)
+import Unsafe.Coerce (unsafeCoerce)
 
 type Term = Lambda Var TT
 
 
 newtype CaseAlternative a
   = CaseAlternative {
-      pattern :: a
+      patterns :: NonEmptyList a
     , guard :: Maybe a 
     , body :: a
     }
@@ -51,17 +54,17 @@ newtype CaseAlternative a
 derive newtype instance Eq a => Eq (CaseAlternative a)
 
 instance Functor CaseAlternative where
-  map f (CaseAlternative a) = CaseAlternative { pattern: f a.pattern, guard: map f a.guard, body: f a.body }
+  map f (CaseAlternative a) = CaseAlternative { patterns: map f a.patterns, guard: map f a.guard, body: f a.body }
 
 instance Foldable CaseAlternative where
-  foldr f b (CaseAlternative a) = f a.body (foldr f (f a.pattern b) a.guard)
-  foldl f b (CaseAlternative a) = f (foldl f (f b a.pattern) a.guard) a.body
-  foldMap f (CaseAlternative a) = f a.pattern <> foldMap f a.guard <> f a.body
+  foldr f b (CaseAlternative a) = f a.body (foldr f (foldr f b a.patterns) a.guard)
+  foldl f b (CaseAlternative a) = f (foldl f (foldl f b a.patterns) a.guard) a.body
+  foldMap f (CaseAlternative a) = foldMap f a.patterns <> foldMap f a.guard <> f a.body
  
 instance Traversable CaseAlternative where
   traverse f (CaseAlternative a) =
-    (\pattern guard body -> CaseAlternative { pattern, guard, body })
-      <$> f a.pattern
+    (\patterns guard body -> CaseAlternative { patterns, guard, body })
+      <$> traverse f a.patterns
       <*> traverse f a.guard
       <*> f a.body
   sequence = traverse identity
@@ -77,7 +80,8 @@ data TT a =
   | TypeLit Term
   | Native (Native Term)
   | Pattern String
-  | Case a (NonEmptyList (CaseAlternative a)) 
+  | Data (Data Term)
+  | Case (NonEmptyList a) (NonEmptyList (CaseAlternative a)) 
 
 
 -- a Class is a dictionary of types
@@ -113,7 +117,8 @@ instance Functor TT where
   map _ (TypeLit t) = TypeLit t
   map _ (Native n) = Native n 
   map _ (Pattern p) = Pattern p
-  map f (Case a e) = Case (f a) (map f <$> e)
+  map _ (Data d) = Data d
+  map f (Case a e) = Case (map f a) (map f <$> e)
 
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
@@ -123,7 +128,8 @@ instance Traversable TT where
   traverse _ (TypeLit t) = pure $ TypeLit t
   traverse _ (Native n) = pure $ Native n 
   traverse _ (Pattern p) = pure $ Pattern p
-  traverse f (Case o b) = Case <$> f o <*> traverse (traverse f) b
+  traverse _ (Data d) = pure $ Data d
+  traverse f (Case o b) = Case <$> traverse f o <*> traverse (traverse f) b
   sequence = traverse identity
 
 instance Skolemize Mu Var TT where
@@ -145,7 +151,8 @@ instance Foldable TT where
   foldr _ b (TypeLit _) = b
   foldr _ b (Native _) = b
   foldr _ b (Pattern _) = b
-  foldr f b (Case a e) = foldl (foldr f) (f a b) e
+  foldr _ b (Data _) = b
+  foldr f b (Case a e) = foldl (foldr f) (foldr f b a) e
   foldl _ b (Star _) = b
   foldl _ b Arrow = b
   foldl f b (Let bs bd) = f (foldl f b bs) bd
@@ -153,7 +160,8 @@ instance Foldable TT where
   foldl _ b (TypeLit _) = b
   foldl _ b (Native _) = b
   foldl _ b (Pattern _) = b
-  foldl f b (Case a e) = foldl (foldl f) (f b a) e
+  foldl _ b (Data _) = b
+  foldl f b (Case a e) = foldl (foldl f) (foldl f b a) e
   foldMap _ (Star _) = mempty
   foldMap _ Arrow = mempty
   foldMap f (Let bs b) = foldMap f bs <> f b
@@ -161,7 +169,8 @@ instance Foldable TT where
   foldMap _ (TypeLit _) = mempty
   foldMap _ (Native _) = mempty
   foldMap _ (Pattern _) = mempty
-  foldMap f (Case a e) = f a <> foldMap (foldMap f) e
+  foldMap _ (Data _) = mempty
+  foldMap f (Case a e) = foldMap f a <> foldMap (foldMap f) e
 
 newtype Scope = Scope Int
 derive newtype instance Show Scope
@@ -239,10 +248,11 @@ instance PrettyLambda Var TT where
   prettyCat (TypeLit a) = text "@" <> pretty a
   prettyCat (Native (Purescript { nativePretty })) = text nativePretty
   prettyCat (Pattern p) = text p
-  prettyCat (Case a e) = text "case" <+> pretty a <+> text "of"
+  prettyCat (Data d) = pretty d
+  prettyCat (Case a e) = text "case" <+> foldl beside mempty (pretty <$> a) <+> text "of"
                       </> stack (prettyAlt <$> List.fromFoldable e)
-    where prettyAlt (CaseAlternative { pattern, guard, body }) =
-            pretty pattern <+> prettyGuard guard <+> text "=>" <+> pretty body
+    where prettyAlt (CaseAlternative { patterns, guard, body }) =
+            foldl beside mempty (pretty <$> patterns) <+> prettyGuard guard <+> text "=>" <+> pretty body
           prettyGuard = maybe mempty (\g -> text "|" <+> pretty g)
 
 
@@ -277,6 +287,7 @@ instance
   , Fresh Var m
   , Skolemize Mu Var TT
   , MonadState (TypingContext Var Mu Var TT) m
+  , NotInScopeError Var m
   ) => Unify Var Term m where
   unify v@(Ident i) t =
     case project t of
@@ -302,14 +313,15 @@ instance
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
+  , NotInScopeError Var m
   ) => Unify (TT Term) (TT Term) m where
   unify Arrow Arrow = pure unit
   -- TODO cumulativity ~ universe hierarchy
   -- * -> * must be in a higher universe than *
   -- ?? arrow has a dependent type (Star n -> Star m -> Star (max(n,m)+1)
   -- !! constraints must prevent Type in Type
-  -- alternatively - who cares? maybe it's fine
-  unify (Star _) (Star _) = pure unit
+  -- unify (a -> b) * ~> ((a :: *) -> (b :: *))
+  unify (Star a) (Star b) | a <= b = pure unit 
   unify (TypeAnnotation a ak) (TypeAnnotation b bk) = unify ak bk  *> unify a b
   unify (TypeAnnotation a _) b = unify a (cat b)
   unify a (TypeAnnotation b _) = unify (cat a) b
@@ -350,18 +362,20 @@ instance
     pure (vt' :< tail vt)
   inference (TypeLit t) = infer t 
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
-  inference (Case exp branches) = do
+  inference (Case args branches) = do
+    -- TODO check all branches have the same number of patterns as the args in the case
     -- TODO check all the guards are of type Boolean
-    typedExp <- exp 
+    typedArgs <- sequence args
     let typeBranch (CaseAlternative a) = do
-           pattern <- a.pattern
+           patterns <- sequence a.patterns
            guard <- sequence a.guard
            body <- a.body
-           pure $ CaseAlternative { pattern, guard, body } 
+           pure $ CaseAlternative { patterns, guard, body } 
     typedBranches <- traverse typeBranch branches
-    let expTy = head typedExp
+    let argTys = head <$> typedArgs 
         unifyBinder arg = join <<< map (unify arg <<< head)
-        unifyBinders (CaseAlternative { pattern }) = unifyBinder expTy pattern
+        unifyBinders (CaseAlternative { patterns }) = do
+           sequence_ (zipWith unifyBinder argTys patterns)             
         getBody (CaseAlternative { body }) = body
     traverse_ unifyBinders branches
     bodies <- map head <$> sequence (getBody <$> branches)
@@ -369,11 +383,17 @@ instance
     let unifyAll a b = do
           unify a b
           rewrite a
-    expTy' <- rewrite expTy
+    argTys' <- traverse rewrite argTys
     tbody <- foldM unifyAll t bodies
-    let caseTy = arrow expTy' tbody
-    pure $ caseTy :< (Cat (Case typedExp typedBranches))
+    let caseTy = arrMany argTys' tbody
+    pure $ caseTy :< (Cat (Case typedArgs typedBranches))
   inference (Pattern p) = require (Ident $ TermVar p) >>= \t -> pure (t :< Cat (Pattern p))
+  inference (Data (DataConstructor c t)) = pure (t :< Cat (Data (DataConstructor c t))) 
+  inference (Data (DataNative (Purescript n))) = pure (n.nativeType :< Cat (Data (DataNative (Purescript n))))
+  inference (Data (DataApp a b)) = do
+     at <- head <$> infer (cat (Data a) :: Term)
+     bt <- head <$> infer (cat (Data b) :: Term)
+     pure $ ((app at bt) :< Cat (Data (DataApp a b)))
  
 
 instance
@@ -400,6 +420,13 @@ instance
                                        , nativePretty
                                        , nativeTerm: na.nativeTerm nb.nativeTerm
                                        }))
+--      Cat (Pattern p) /\ Cat (Native nt@(Purescript n)) -> do
+--        nativeType <- head <$> infer (app a b)
+--        let nativePretty = "(" <> p <> " " <> n.nativePretty <> ")"
+--        pure $ cat (Native (Purescript { nativeType
+--                                       , nativePretty
+--                                       , nativeTerm: unsafeCoerce (DataApp (DataConstructor p) (DataNative nt)) 
+--                                       }))
       _ -> pure $ app a b 
 
 instance
@@ -435,6 +462,59 @@ instance
       TypeAnnotation (In (Cat (Native (Purescript na)))) t -> do
          unify na.nativeType t
          pure (cat (Native (Purescript (na { nativeType = t }))))
+      Case args alts -> do
+         argTys <- traverse (map head <<< infer) args
+         pure (appMany (reduceCase argTys alts) args)
       c -> pure $ cat c
+
+
+bindPattern :: Term -> Data Term -> Maybe (List (Var /\ Native Term)) 
+bindPattern (In (App a b)) (DataApp a' b') = append <$> bindPattern a a' <*> bindPattern b b'
+bindPattern t@(In (App _ _)) (DataNative (Purescript p)) = bindPattern t p.nativeTerm
+bindPattern (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) | c == c' = Just Nil
+bindPattern t@(In (Cat (Data (DataConstructor _ _)))) (DataNative (Purescript p)) = bindPattern t p.nativeTerm
+bindPattern (In (Var v)) (DataNative n) = Just $ pure (v /\ n) 
+bindPattern _ _ = Nothing
+
+
+-- case a b c of {} ~~> \a b c -> {}
+
+-- conceptually we want to do this but bindPattern needs to be deferred until runtime
+reduceCaseAlternative :: (CaseAlternative Term) -> List (Data Term) -> Maybe Term
+reduceCaseAlternative (CaseAlternative { patterns, body }) args = 
+  let bound :: List Var
+      bound = join $ map free (List.fromFoldable patterns)
+      branch :: Term
+      branch = absMany bound body
+      match :: Maybe (List (Var /\ Native Term))
+      match = join <$> (sequence $ List.zipWith bindPattern (List.fromFoldable patterns) args)
+   in appMany branch <<< map (cat <<< Native <<< snd) <$> match
+
+newtype Match = Match (forall a. a)
+
+bindPattern' :: Term -> Data Term -> Maybe (List Match) 
+bindPattern' (In (App a b)) (DataApp a' b') = append <$> bindPattern' a a' <*> bindPattern' b b'
+bindPattern' t@(In (App _ _)) (DataNative (Purescript p)) = bindPattern' t p.nativeTerm
+bindPattern' (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) | c == c' = Just Nil
+bindPattern' t@(In (Cat (Data (DataConstructor _ _)))) (DataNative (Purescript p)) = bindPattern' t p.nativeTerm
+bindPattern' (In (Var v)) (DataNative (Purescript { nativeTerm })) = Just $ pure $ Match (unsafeCoerce nativeTerm)
+bindPattern' _ _ = Nothing
+
+reduceCaseAlternative' :: (CaseAlternative Term) -> (List (Data Term) -> Maybe (List Match)) /\ Term
+reduceCaseAlternative' (CaseAlternative { patterns, body }) = 
+  let bound :: List Var
+      bound = join $ map free (List.fromFoldable patterns)
+      branch :: Term
+      branch = absMany bound body
+      foo args = join <$> (sequence $ List.zipWith bindPattern' (List.fromFoldable patterns) args)
+   in foo /\ branch 
+
+
+reduceCase :: NonEmptyList Term -> NonEmptyList (CaseAlternative Term) -> Term
+reduceCase _ = unsafeCoerce unit 
+
+bing :: forall a b. a -> (List a -> b) -> (List a -> b)
+bing a f = f <<< List.(:) a
+
 
 
