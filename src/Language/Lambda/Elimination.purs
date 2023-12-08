@@ -10,7 +10,7 @@ import Data.Traversable (class Traversable)
 import Data.Tuple (fst)
 import Effect.Class (class MonadEffect)
 import Language.Lambda.Basis (class Basis, basisB, basisC, basisI, basisK, basisS)
-import Language.Lambda.Calculus (class Shadow, LambdaF(..), freeIn, var)
+import Language.Lambda.Calculus (class FreeVars, class Shadow, LambdaF(..), freeIn, var)
 import Language.Lambda.Elimination.Algebra (EliminationAlgebra(..))
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsTypeApp, appRule, closeTerm, flat, unifyWithArrow, (:->:))
 import Language.Lambda.Unification (class Context, class Fresh, class NotInScopeError, class Skolemize, class Substitute, class Unify)
@@ -21,8 +21,8 @@ import Matryoshka.Class.Recursive (class Recursive)
 import Type.Proxy (Proxy)
 
 eliminate :: forall f var cat t m.
-             Recursive (f (LambdaF var cat)) (LambdaF var cat) 
-          => Corecursive (f (LambdaF var cat)) (LambdaF var cat) 
+             Recursive (f (LambdaF var var cat)) (LambdaF var var cat) 
+          => Corecursive (f (LambdaF var var cat)) (LambdaF var var cat) 
           => Ord var
           => Traversable cat
           => Functor cat
@@ -31,27 +31,29 @@ eliminate :: forall f var cat t m.
           => MonadEffect m
           => Fresh Int m
           => Fresh var m
-          => Fresh (f (LambdaF var cat)) m
+          => Fresh (f (LambdaF var var cat)) m
           => Shadow var
           => Skolemize f var cat
           => Substitute var cat f m
-          => Unify (cat (f (LambdaF var cat))) (cat (f (LambdaF var cat))) m
-          => Unify var (f (LambdaF var cat)) m
-          => ThrowUnificationError (f (LambdaF var cat)) m 
-          => ArrowObject (cat (f (LambdaF var cat))) 
+          => Unify (cat (f (LambdaF var var cat))) (cat (f (LambdaF var var cat))) m
+          => Unify var (f (LambdaF var var cat)) m
+          => ThrowUnificationError (f (LambdaF var var cat)) m 
+          => ArrowObject (cat (f (LambdaF var var cat))) 
           => NotInScopeError var m
-          => Context var (f (LambdaF var cat)) m
-          => Inference var cat (f (LambdaF var cat)) m 
-          => IsTypeApp var cat (f (LambdaF var cat))
-          => Eq (f (LambdaF var cat))
+          => Context var (f (LambdaF var var cat)) m
+          => Inference var cat (f (LambdaF var var cat)) m 
+          => IsTypeApp var cat (f (LambdaF var var cat))
+          => Eq (f (LambdaF var var cat))
           => Composition f var cat m
           => Reduction f var cat m
+          => FreeVars var var cat
           => Proxy t
-          -> Cofree (LambdaF var cat) (f (LambdaF var cat))
-          -> m (Cofree (LambdaF var cat) (f (LambdaF var cat)))
+          -> Cofree (LambdaF var var cat) (f (LambdaF var var cat))
+          -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))
 eliminate p = hyloM catamorphism anamorphism 
   where
-    anamorphism :: CoalgebraM m (EliminationAlgebra var cat (f (LambdaF var cat))) (Cofree (LambdaF var cat) (f (LambdaF var cat)))
+    anamorphism :: CoalgebraM m (EliminationAlgebra var cat (f (LambdaF var var cat)))
+                                (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))
     anamorphism l =
       case tail l of
         Var v -> pure $ VarRule v (head l) 
@@ -59,29 +61,32 @@ eliminate p = hyloM catamorphism anamorphism
         Abs x e ->
           case tail e of
             Var v | v == x -> pure BasisI
-            Abs _ f | x `freeIn` (flat f) -> pure $ AbsRule (head l) x e
-            App a b | flat b == var x && (not (x `freeIn` (flat a)))-> pure $ EtaReduce a
-            App e1 e2 | x `freeIn` (flat e1) && x `freeIn` (flat e2) -> do
+            Abs _ f | x `freeIn` (flat f :: f (LambdaF var var cat)) -> pure $ AbsRule (head l) x e
+            App a b | (flat b :: f (LambdaF var var cat)) == var x
+                    && (not (x `freeIn` (flat a :: f (LambdaF var var cat))))-> pure $ EtaReduce a
+            App e1 e2 | x `freeIn` (flat e1 :: f (LambdaF var var cat))
+                        && x `freeIn` (flat e2 :: f (LambdaF var var cat)) -> do
                       art <- unifyWithArrow (head l)
                       let typ = fst art
                           t1 = (closeTerm $ typ :->: head e1) :< Abs x e1
                           t2 = (closeTerm $ typ :->: head e2) :< Abs x e2
                       pure $ BasisS t1 t2
-            App e1 e2 | x `freeIn` (flat e1) -> do
+            App e1 e2 | x `freeIn` (flat e1 :: f (LambdaF var var cat)) -> do
                       art <- unifyWithArrow (head l)
                       let typ = fst art
                           t1 = (closeTerm $ typ :->: head e1) :< Abs x e1
                       pure $ BasisC t1 e2
-            App e1 e2 | x `freeIn` (flat e2) -> do
+            App e1 e2 | x `freeIn` (flat e2 :: f (LambdaF var var cat)) -> do
                       art <- unifyWithArrow (head l)
                       let typ = fst art
                           t2 = (closeTerm $ typ :->: head e2) :< Abs x e2
                       pure $ BasisB e1 t2
-            Cat _ | x `freeIn` (flat e) -> pure $ AbsRule (head l) x e
+            Cat _ | x `freeIn` (flat e :: f (LambdaF var var cat)) -> pure $ AbsRule (head l) x e
             _ -> pure $ BasisK e
         Cat c -> pure $ CatRule (head l) c
     
-    catamorphism :: AlgebraM m (EliminationAlgebra var cat (f (LambdaF var cat))) (Cofree (LambdaF var cat) (f (LambdaF var cat)))
+    catamorphism :: AlgebraM m (EliminationAlgebra var cat (f (LambdaF var var cat)))
+                               (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))
     catamorphism =
       case _ of
         VarRule v t -> pure $ t :< Var v
@@ -111,16 +116,16 @@ eliminate p = hyloM catamorphism anamorphism
            reduction c typ 
 
 class Composition f var cat m where 
-  composition :: (Cofree (LambdaF var cat) (f (LambdaF var cat)))
-              -> (Cofree (LambdaF var cat) (f (LambdaF var cat)))
-              -> (f (LambdaF var cat))
-              -> m (Cofree (LambdaF var cat) (f (LambdaF var cat)))
+  composition :: (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))
+              -> (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))
+              -> (f (LambdaF var var cat))
+              -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))
  
 
 class Reduction f var cat m where
-  reduction :: cat (Cofree (LambdaF var cat) (f (LambdaF var cat)))
-            -> (f (LambdaF var cat))
-            -> m (Cofree (LambdaF var cat) (f (LambdaF var cat)))
+  reduction :: cat (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))
+            -> (f (LambdaF var var cat))
+            -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))
 
 
 

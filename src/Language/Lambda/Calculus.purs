@@ -21,20 +21,24 @@ import Matryoshka.Fold (cata, cataM)
 import Prettier.Printer (DOC, text)
 
 -- | Un-Fixed LambdaF 
-data LambdaF var cat a =
-    Abs var a
+data LambdaF abs var cat a =
+    Abs abs a
   | App a a
   | Var var
   | Cat (cat a)
 
-type Lambda var cat = Mu (LambdaF var cat)
+type TermF var = LambdaF var var
+type PatternF var = LambdaF Void var
 
-derive instance Generic (LambdaF var cat a) _
+type Lambda abs var cat = Mu (LambdaF abs var cat)
+
+derive instance Generic (LambdaF abs var cat a) _
 
 instance
-  ( Eq var
+  ( Eq abs
+  , Eq var
   , Eq1 cat
-  ) => Eq1 (LambdaF var cat) where
+  ) => Eq1 (LambdaF abs var cat) where
   eq1 (Abs i a) (Abs j b) = i == j && a == b
   eq1 (App ax bx) (App ay by) = ax == ay && bx == by
   eq1 (Var i) (Var j) = i == j
@@ -42,19 +46,20 @@ instance
   eq1 _ _ = false
 
 instance
-  ( Show var
+  ( Show abs
+  , Show var
   , Show (cat a)
   , Show a
-  ) => Show (LambdaF var cat a) where
+  ) => Show (LambdaF abs var cat a) where
   show = genericShow
 
-instance Functor cat => Functor (LambdaF var cat) where
+instance Functor cat => Functor (LambdaF abs var cat) where
   map f (Abs i a) = Abs i (f a)
   map f (App a b) = App (f a) (f b)
   map _ (Var i) = Var i
   map f (Cat c) = Cat (f <$> c)
 
-instance Foldable cat => Foldable (LambdaF var cat) where
+instance Foldable cat => Foldable (LambdaF abs var cat) where
   foldr f b (Abs _ e) = f e b
   foldr f b (App x y) = f y (f x b)
   foldr _ b (Var _) = b
@@ -69,7 +74,7 @@ instance Foldable cat => Foldable (LambdaF var cat) where
   foldMap f (Cat c) = foldMap f c
 
 
-instance Traversable cat => Traversable (LambdaF var cat) where
+instance Traversable cat => Traversable (LambdaF abs var cat) where
   traverse f (Abs p e) = Abs p <$> (f e)
   traverse f (App a b) = App <$> f a <*> f b 
   traverse _ (Var v) = pure (Var v)
@@ -77,72 +82,125 @@ instance Traversable cat => Traversable (LambdaF var cat) where
   sequence = traverse identity
 
 
-freeIn :: forall var cat f .
+
+freeIn :: forall abs var cat f .
             Ord var
          => Foldable cat
-         => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-         => var -> f (LambdaF var cat) -> Boolean
+         => Recursive (f (LambdaF abs var cat)) (LambdaF abs var cat)
+         => FreeVars abs var cat
+         => var -> f (LambdaF abs var cat) -> Boolean
 freeIn v expr = v `elem` free expr
 
 
-free :: forall exp var cat .
+free :: forall exp abs var cat .
         Ord var
      => Foldable cat
-     => Recursive exp (LambdaF var cat)
+     => Recursive exp (LambdaF abs var cat)
+     => FreeVars abs var cat
      => exp -> List var
 free = cata freeVars 
 
+class FreeVars abs var cat where
+  freeVars :: Algebra (LambdaF abs var cat) (List var) 
 
-freeVars :: forall var cat .
-        Ord var
-     => Foldable cat
-     => Algebra (LambdaF var cat) (List var)
-freeVars (Abs v a) = List.delete v a
-freeVars (Var v) = List.singleton v
-freeVars (App a b) = List.nub (a <> b) 
-freeVars (Cat c) = foldl append Nil c
+instance
+  ( Ord var
+  , Foldable cat
+  ) => FreeVars Void var cat where
+  freeVars (Abs _ a) = a
+  freeVars (Var v) = List.singleton v
+  freeVars (App a b) = List.nub (a <> b) 
+  freeVars (Cat c) = foldl append Nil c
+else
+instance
+  ( Ord var
+  , Foldable cat
+  , Recursive (f (LambdaF Void var pat)) (LambdaF Void var pat)
+  , Foldable pat
+  ) => FreeVars (f (LambdaF Void var pat)) var cat where
+  freeVars (Abs v a) = List.difference a (free v)
+  freeVars (Var v) = List.singleton v
+  freeVars (App a b) = List.nub (a <> b) 
+  freeVars (Cat c) = foldl append Nil c
+else
+instance
+  ( Ord var
+  , Foldable cat
+  ) => FreeVars var var cat where
+  freeVars (Abs v a) = List.delete v a 
+  freeVars (Var v) = List.singleton v
+  freeVars (App a b) = List.nub (a <> b) 
+  freeVars (Cat c) = foldl append Nil c
 
-occursIn :: forall var cat f .
+
+occursIn :: forall exp abs var cat .
             Ord var
          => Foldable cat
-         => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-         => var -> f (LambdaF var cat) -> Boolean
+         => Recursive exp (LambdaF abs var cat)
+         => AllVars abs var cat
+         => var -> exp -> Boolean
 occursIn v expr = v `Set.member` universe expr
 
-universe :: forall var cat f .
+universe :: forall exp abs var cat .
             Ord var
          => Foldable cat
-         => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-         => f (LambdaF var cat) -> (Set var)
+         => Recursive exp (LambdaF abs var cat)
+         => AllVars abs var cat
+         => exp -> (Set var)
 universe = cata allVars
 
-allVars :: forall var cat .
-        Ord var
-     => Foldable cat
-     => Algebra (LambdaF var cat) (Set var)
-allVars (Abs v a) = Set.insert v a
-allVars (Var v) = Set.singleton v
-allVars (App a b) = a `Set.union` b 
-allVars (Cat c) = foldr Set.union Set.empty c
+class AllVars abs var cat where
+  allVars :: Algebra (LambdaF abs var cat) (Set var) 
+
+instance
+  ( Ord var
+  , Foldable cat
+  ) => AllVars Void var cat where
+  allVars (Abs _ a) = a
+  allVars (Var v) = Set.singleton v
+  allVars (App a b) = a `Set.union` b 
+  allVars (Cat c) = foldr Set.union Set.empty c
+else
+instance
+  ( Ord var
+  , Foldable cat
+  , Foldable pat
+  , Recursive (f (LambdaF Void var pat)) (LambdaF Void var pat)
+  ) => AllVars (f (LambdaF Void var pat)) var cat where
+  allVars (Abs v a) = Set.union (universe v) a
+  allVars (Var v) = Set.singleton v
+  allVars (App a b) = a `Set.union` b 
+  allVars (Cat c) = foldr Set.union Set.empty c
+else
+instance
+  ( Ord var
+  , Foldable cat
+  ) => AllVars var var cat where
+  allVars (Abs v a) = Set.insert v a
+  allVars (Var v) = Set.singleton v
+  allVars (App a b) = a `Set.union` b 
+  allVars (Cat c) = foldr Set.union Set.empty c
+
+
 
 replace :: forall var cat f .
            Eq var
         => Foldable cat
-        => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-        => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-        => (var -> Maybe (f (LambdaF var cat)))
-        -> f (LambdaF var cat)
-        -> f (LambdaF var cat)
+        => Recursive (f (LambdaF var var cat)) (LambdaF var var cat)
+        => Corecursive (f (LambdaF var var cat)) (LambdaF var var cat)
+        => (var -> Maybe (f (LambdaF var var cat)))
+        -> f (LambdaF var var cat)
+        -> f (LambdaF var var cat)
 replace = cata <<< onVar
 
 
 onVar :: forall var cat f .
         Eq var
      => Foldable cat
-     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-     => (var -> Maybe (f (LambdaF var cat)))
-     -> Algebra (LambdaF var cat) (f (LambdaF var cat))
+     => Corecursive (f (LambdaF var var cat)) (LambdaF var var cat)
+     => Recursive (f (LambdaF var var cat)) (LambdaF var var cat)
+     => (var -> Maybe (f (LambdaF var var cat)))
+     -> Algebra (LambdaF var var cat) (f (LambdaF var var cat))
 onVar replacement =
   case _ of
     Abs v a ->
@@ -163,13 +221,13 @@ class Shadow var where
 replaceFree :: forall var cat f .
            Eq var
         => Foldable cat
-        => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-        => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+        => Recursive (f (LambdaF var var cat)) (LambdaF var var cat)
+        => Corecursive (f (LambdaF var var cat)) (LambdaF var var cat)
         => Traversable cat
         => Shadow var
-        => (var -> Maybe (f (LambdaF var cat)))
-        -> f (LambdaF var cat)
-        -> f (LambdaF var cat)
+        => (var -> Maybe (f (LambdaF var var cat)))
+        -> f (LambdaF var var cat)
+        -> f (LambdaF var var cat)
 replaceFree r exp = evalState (cataM onFree exp) r
 
 
@@ -177,9 +235,9 @@ onFree :: forall var cat f .
         Eq var
      => Shadow var
      => Foldable cat
-     => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-     => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-     => AlgebraM (State (var -> Maybe (f (LambdaF var cat)))) (LambdaF var cat) (f (LambdaF var cat))
+     => Corecursive (f (LambdaF var var cat)) (LambdaF var var cat)
+     => Recursive (f (LambdaF var var cat)) (LambdaF var var cat)
+     => AlgebraM (State (var -> Maybe (f (LambdaF var var cat)))) (LambdaF var var cat) (f (LambdaF var var cat))
 onFree exp = do
   replacement <- get
   case exp of
@@ -202,46 +260,46 @@ instance PrettyVar String where
 instance PrettyVar Void where
   prettyVar = absurd
 
-class PrettyVar var <= PrettyLambda var cat where
-  prettyAbs :: var -> Lambda var cat -> DOC
-  prettyApp :: Lambda var cat -> Lambda var cat -> DOC
-  prettyCat :: cat (Lambda var cat) -> DOC
+class PrettyVar var <= PrettyLambda abs var cat where
+  prettyAbs :: abs -> Lambda abs var cat -> DOC
+  prettyApp :: Lambda abs var cat -> Lambda abs var cat -> DOC
+  prettyCat :: cat (Lambda abs var cat) -> DOC
 
 
-absMany :: forall t lam var cat .
-           Corecursive lam (LambdaF var cat)
+absMany :: forall t lam abs var cat .
+           Corecursive lam (LambdaF abs var cat)
         => Functor t
         => Foldable t
-        => t var -> lam -> lam
+        => t abs -> lam -> lam
 absMany ps = flip (foldr ($)) (abs <$> ps) 
 
-appMany :: forall t lam var cat .
-            Corecursive lam (LambdaF var cat)
+appMany :: forall t lam abs var cat .
+            Corecursive lam (LambdaF abs var cat)
         => Functor t
         => Foldable t
         => lam -> t lam -> lam
 appMany f args = foldl app f args
           
  
-abs :: forall lam var cat .
-       Corecursive lam (LambdaF var cat)
-    => var -> lam -> lam
+abs :: forall lam abs var cat .
+       Corecursive lam (LambdaF abs var cat)
+    => abs -> lam -> lam
 abs p = embed <<< Abs p
 
 
-app :: forall lam var cat .
-       Corecursive lam (LambdaF var cat)
+app :: forall lam abs var cat .
+       Corecursive lam (LambdaF abs var cat)
     => lam -> lam -> lam
 app a = embed <<< App a
 
 
-var :: forall lam var cat .
-       Corecursive lam (LambdaF var cat)
+var :: forall lam abs var cat .
+       Corecursive lam (LambdaF abs var cat)
     => var -> lam
 var = embed <<< Var
 
-cat :: forall lam var cat .
-       Corecursive lam (LambdaF var cat)
+cat :: forall lam abs var cat .
+       Corecursive lam (LambdaF abs var cat)
     => cat lam -> lam 
 cat = embed <<< Cat
 

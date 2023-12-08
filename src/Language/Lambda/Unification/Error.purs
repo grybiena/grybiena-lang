@@ -21,21 +21,21 @@ import Pretty.Printer (class Pretty, pretty)
 data UnificationError f var cat =
     NotInScope var
   | Err String
-  | InvalidApp (f (LambdaF var cat)) (f (LambdaF var cat)) 
-  | UnificationError (f (LambdaF var cat)) (f (LambdaF var cat)) 
+  | InvalidApp (f (LambdaF var var cat)) (f (LambdaF var var cat)) 
+  | UnificationError (f (LambdaF var var cat)) (f (LambdaF var var cat)) 
   | NativeTypeParseError ParseError
-  | RecursiveModuleError (Module var (f (LambdaF var cat)))
+  | RecursiveModuleError (Module var (f (LambdaF var var cat)))
 
 derive instance Generic (UnificationError f var cat) _
 
 instance
   ( Show var
-  , Show (f (LambdaF var cat))
+  , Show (f (LambdaF var var cat))
   ) => Show (UnificationError f var cat) where
   show = genericShow
 
 class Monad m <= ThrowRecursiveModuleError f var cat m where
-  recursiveModuleError :: forall a. Module var (f (LambdaF var cat) )-> m a
+  recursiveModuleError :: forall a. Module var (f (LambdaF var var cat) )-> m a
 
 class Monad m <= ThrowUnificationError typ m where
   unificationError :: forall a. typ -> typ -> m a
@@ -47,10 +47,10 @@ instance Monad m => ThrowRecursiveModuleError f var cat (ExceptT (UnificationErr
   recursiveModuleError = throwError <<< RecursiveModuleError
 
 
-instance Monad m => ThrowUnificationError (f (LambdaF var cat)) (ExceptT ParseError (ExceptT (UnificationError f var cat) m)) where 
+instance Monad m => ThrowUnificationError (f (LambdaF var var cat)) (ExceptT ParseError (ExceptT (UnificationError f var cat) m)) where 
   unificationError a b = lift $ throwError (UnificationError a b)
 
-instance Monad m => ThrowUnificationError (f (LambdaF var cat)) (ExceptT (UnificationError f var cat) m) where 
+instance Monad m => ThrowUnificationError (f (LambdaF var var cat)) (ExceptT (UnificationError f var cat) m) where 
   unificationError a b = throwError (UnificationError a b)
 
 
@@ -66,7 +66,7 @@ instance Monad m => ThrowNativeTypeParseError (ExceptT (UnificationError f var c
 
 instance
   ( Pretty var
-  , Pretty (f (LambdaF var cat))
+  , Pretty (f (LambdaF var var cat))
   ) => Pretty (UnificationError f var cat) where
   pretty (NotInScope v) = text "Not in scope:" <+> pretty v
   pretty (Err err) = text "Error:" <+> text err
@@ -78,7 +78,7 @@ instance
 
 instance
   ( Eq var
-  , Eq (f (LambdaF var cat))
+  , Eq (f (LambdaF var var cat))
   ) => Eq (UnificationError f var cat) where
   eq = genericEq
 

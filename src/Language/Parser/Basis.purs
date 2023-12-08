@@ -6,7 +6,7 @@ import Language.Lambda.Calculus (LambdaF)
 import Parsing (ParseError)
 
 class (Monad (t m), Monad m) <= BasisParser t m f var cat where
-  parseBasis :: t m (f (LambdaF var cat)) 
+  parseBasis :: t m (f (LambdaF var var cat)) 
 
 
 class StringParserT t m where

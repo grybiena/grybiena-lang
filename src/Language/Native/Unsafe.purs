@@ -10,7 +10,7 @@ import Data.Homogeneous (class HomogeneousRowLabels)
 import Data.Homogeneous.Record (homogeneous)
 import Data.Symbol (class IsSymbol, reflectSymbol)
 import Heterogeneous.Mapping (class MapRecordWithIndex, class MappingWithIndex, hmapWithIndex)
-import Language.Lambda.Calculus (class Shadow, LambdaF)
+import Language.Lambda.Calculus (class AllVars, class Shadow, LambdaF)
 import Language.Lambda.Unification (class Fresh, renameFresh)
 import Language.Native (Native(..))
 import Language.Native.Module (NativeModule)
@@ -24,14 +24,14 @@ import Unsafe.Coerce (unsafeCoerce)
 
 unsafeModule :: forall t f var cat m mod names het listing.
 
-     HomogeneousRowLabels het (m (Native (f (LambdaF var cat)))) listing 
+     HomogeneousRowLabels het (m (Native (f (LambdaF var var cat)))) listing 
   => RowToList mod names 
   => MapRecordWithIndex names (UnsafeNativeTerm t) mod het 
   => MonadRec m
   => Fresh Int m
   => Proxy t
   -> Record mod
-  -> NativeModule listing (m (Native (f (LambdaF var cat))))
+  -> NativeModule listing (m (Native (f (LambdaF var var cat))))
 unsafeModule _ r = let (x :: Record het) = hmapWithIndex (UnsafeNativeTerm :: UnsafeNativeTerm t) r in homogeneous x 
 
 newtype UnsafeNative (unsafeType :: Symbol) = UnsafeNative (forall a. a)
@@ -49,11 +49,12 @@ instance
   , Ord var
   , Shadow var
   , Foldable cat
-  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+  , Recursive (f (LambdaF var var cat)) (LambdaF var var cat)
+  , Corecursive (f (LambdaF var var cat)) (LambdaF var var cat)
   , BasisParser t m f var cat
   , StringParserT t m
-  ) => MappingWithIndex (UnsafeNativeTerm t) (Proxy sym) (UnsafeNative typ) (m (Native (f (LambdaF var cat)))) where
+  , AllVars var var cat
+  ) => MappingWithIndex (UnsafeNativeTerm t) (Proxy sym) (UnsafeNative typ) (m (Native (f (LambdaF var var cat)))) where
   mappingWithIndex UnsafeNativeTerm = \i t -> unsafeNative (Proxy :: Proxy t) (reflectSymbol i) t
 
 
@@ -67,16 +68,17 @@ unsafeNative :: forall typ f var cat t m .
            => Ord var
            => Shadow var
            => Foldable cat
-           => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-           => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+           => Recursive (f (LambdaF var var cat)) (LambdaF var var cat)
+           => Corecursive (f (LambdaF var var cat)) (LambdaF var var cat)
            => BasisParser t m f var cat
            => StringParserT t m
+           => AllVars var var cat
            => Proxy t
            -> String
            -> UnsafeNative typ
-           -> m (Native (f (LambdaF var cat)))
+           -> m (Native (f (LambdaF var var cat)))
 unsafeNative _ nativePretty (UnsafeNative nativeTerm) = do
-  t <- runStringParserT (reflectSymbol (Proxy :: Proxy typ)) (parseBasis :: t m (f (LambdaF var cat)))
+  t <- runStringParserT (reflectSymbol (Proxy :: Proxy typ)) (parseBasis :: t m (f (LambdaF var var cat)))
   flip (either throwError) t $ \nt -> do
      nativeType <- renameFresh nt
      pure $ Purescript { nativeType

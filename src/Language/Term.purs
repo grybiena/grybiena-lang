@@ -26,7 +26,7 @@ import Data.Traversable (class Traversable, sequence, traverse, traverse_)
 import Data.Tuple (snd, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Kernel.Data (Data(..))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), absMany, app, appMany, cat, free, prettyVar, replace, replaceFree, shadow, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), PatternF, absMany, app, appMany, cat, free, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, arrMany, arrow, closeTerm, flat, infer)
 import Language.Lambda.Module (Module(..), sequenceBindings)
@@ -40,12 +40,13 @@ import Pretty.Printer (class Pretty, pretty, prettyPrint)
 import Prim (Array, Boolean, Int, Number, Record, String)
 import Unsafe.Coerce (unsafeCoerce)
 
-type Term = Lambda Var TT
+type Term = Lambda Var Var TT
 
+type Pattern = Mu (PatternF Var TT)
 
 newtype CaseAlternative a
   = CaseAlternative {
-      patterns :: NonEmptyList a
+      patterns :: NonEmptyList Pattern
     , guard :: Maybe a 
     , body :: a
     }
@@ -53,18 +54,17 @@ newtype CaseAlternative a
 derive newtype instance Eq a => Eq (CaseAlternative a)
 
 instance Functor CaseAlternative where
-  map f (CaseAlternative a) = CaseAlternative { patterns: map f a.patterns, guard: map f a.guard, body: f a.body }
+  map f (CaseAlternative a) = CaseAlternative { patterns: a.patterns, guard: map f a.guard, body: f a.body }
 
 instance Foldable CaseAlternative where
-  foldr f b (CaseAlternative a) = f a.body (foldr f (foldr f b a.patterns) a.guard)
-  foldl f b (CaseAlternative a) = f (foldl f (foldl f b a.patterns) a.guard) a.body
-  foldMap f (CaseAlternative a) = foldMap f a.patterns <> foldMap f a.guard <> f a.body
+  foldr f b (CaseAlternative a) = f a.body (foldr f b a.guard)
+  foldl f b (CaseAlternative a) = f (foldl f b a.guard) a.body
+  foldMap f (CaseAlternative a) = foldMap f a.guard <> f a.body
  
 instance Traversable CaseAlternative where
   traverse f (CaseAlternative a) =
-    (\patterns guard body -> CaseAlternative { patterns, guard, body })
-      <$> traverse f a.patterns
-      <*> traverse f a.guard
+    (\guard body -> CaseAlternative { patterns: a.patterns, guard, body })
+      <$> traverse f a.guard
       <*> f a.body
   sequence = traverse identity
 
@@ -104,7 +104,7 @@ instance (Pretty a, Show a) => Show (TT a) where
   show (TypeAnnotation a t) = "TypeAnnotation " <> show a <> " " <> show t
   show e = genericShow e
 
-instance IsStar Mu Var TT where
+instance IsStar Mu Var Var TT where
   isStar t = case project t of
                Cat (Star _) -> true
                _ -> false
@@ -237,7 +237,13 @@ isTypeVar (Ident i) = isTypeIdent i
 isTypeVar (Scoped i _) = isTypeIdent i
 isTypeVar (Skolemized i _ _) = isTypeIdent i
 
-instance PrettyLambda Var TT where
+instance PrettyLambda Void Var TT where
+  prettyAbs v _ = absurd v
+  prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
+  prettyCat (Pattern p) = text p
+  prettyCat _  = text "TODO pattern category"
+
+instance PrettyLambda Var Var TT where
   prettyAbs i a | isTypeVar i = text "(forall " <> prettyVar i <+> text "." <+> pretty a <> text ")"
   prettyAbs i a = text "(\\" <> prettyVar i <+> text "->" <+> pretty a <> text ")"
   prettyApp (In (App (In (Cat Arrow)) a)) b = text "(" <> pretty a <+> text "->" <+> pretty b <> text ")"
@@ -363,7 +369,7 @@ instance
      t <- a
      pure $ head t :< Cat (Let (Module bz) t)
   inference (TypeAnnotation v t) = do
-    (vt :: Cofree (LambdaF Var TT) Term) <- v
+    (vt :: Cofree (LambdaF Var Var TT) Term) <- v
     unify (head vt :: Term) t
     vt' <- rewrite (head vt)
     pure (vt' :< tail vt)
@@ -374,17 +380,18 @@ instance
     -- TODO check all the guards are of type Boolean
     typedArgs <- sequence args
     let typeBranch (CaseAlternative a) = do
-           patterns <- sequence a.patterns
+           traverse_ (\x -> fresh >>= assume x) (join (List.fromFoldable $ free <$> a.patterns))
            guard <- sequence a.guard
            body <- a.body
-           pure $ CaseAlternative { patterns, guard, body } 
+           pure $ CaseAlternative { patterns: a.patterns, guard, body } 
     typedBranches <- traverse typeBranch branches
     let argTys = head <$> typedArgs 
-        unifyBinder arg = join <<< map (unify arg <<< head)
-        unifyBinders (CaseAlternative { patterns }) = do
-           sequence_ (zipWith unifyBinder argTys patterns)             
         getBody (CaseAlternative { body }) = body
-    traverse_ unifyBinders branches
+--        unifyBinder arg = join <<< map (unify arg <<< head)
+--        unifyBinders (CaseAlternative { patterns }) = do
+--           sequence_ (zipWith unifyBinder argTys patterns)             
+
+--    traverse_ unifyBinders branches
     bodies <- map head <$> sequence (getBody <$> branches)
     (t :: Term) <- fresh 
     let unifyAll a b = do
@@ -442,23 +449,9 @@ instance
       Let bi bo -> do
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
---             annotate :: Var -> Term -> m (Var /\ Term)
---             annotate v t =
---               case project t of
---                  (Cat (TypeAnnotation q r)) -> do
---                    qt <- head <$> infer q
---                    unify qt r
---                    pure (v /\ q)
---                  _ -> pure (v /\ t)               
          case sequenceBindings (flat <$> bi) of
            Left err -> recursiveModuleError err
-           Right seq -> do
---              flip traverse_ seq $ \(v /\ _) -> do
---                 t <- fresh
---                 assume v t
---              seq' <- traverse (uncurry annotate) seq
-             infer $ foldl (flip $ uncurry inline) (flat bo) seq
-
+           Right seq -> infer $ foldl (flip $ uncurry inline) (flat bo) seq
       TypeAnnotation f a -> do
          unify (head f) a
          pure $ a :< tail f
@@ -468,7 +461,7 @@ instance
       c -> pure $ t :< Cat c
 
 
-bindPattern :: Term -> Data Term -> Maybe (List (Var /\ Native Term)) 
+bindPattern :: Pattern -> Data Term -> Maybe (List (Var /\ Native Term)) 
 bindPattern (In (App a b)) (DataApp a' b') = append <$> bindPattern a a' <*> bindPattern b b'
 bindPattern t@(In (App _ _)) (DataNative (Purescript p)) = bindPattern t p.nativeTerm
 bindPattern (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) | c == c' = Just Nil
@@ -492,7 +485,7 @@ reduceCaseAlternative (CaseAlternative { patterns, body }) args =
 
 newtype Match = Match (forall a. a)
 
-bindPattern' :: Term -> Data Term -> Maybe (List Match) 
+bindPattern' :: Pattern -> Data Term -> Maybe (List Match) 
 bindPattern' (In (App a b)) (DataApp a' b') = append <$> bindPattern' a a' <*> bindPattern' b b'
 bindPattern' t@(In (App _ _)) (DataNative (Purescript p)) = bindPattern' t p.nativeTerm
 bindPattern' (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) | c == c' = Just Nil

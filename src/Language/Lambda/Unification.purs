@@ -13,7 +13,7 @@ import Data.Maybe (Maybe(..))
 import Data.Set as Set
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Lambda.Calculus (class Shadow, LambdaF(..), occursIn, replace, replaceFree, shadow, universe, var)
+import Language.Lambda.Calculus (class AllVars, class Shadow, LambdaF(..), TermF, occursIn, replace, replaceFree, shadow, universe, var)
 import Language.Lambda.Unification.Error (class ThrowUnificationError, unificationError)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
@@ -25,8 +25,8 @@ class Monad m <= Fresh typ m where
   fresh :: m typ
 
 class Substitute var cat f m where
-  substitute :: var -> f (LambdaF var cat) -> m Unit
-  substitution :: m (var -> Maybe (f (LambdaF var cat)))
+  substitute :: var -> f (TermF var cat) -> m Unit
+  substitution :: m (var -> Maybe (f (TermF var cat)))
 
 class Rewrite typ m where
   rewrite :: typ -> m typ
@@ -36,10 +36,10 @@ instance
   , Traversable cat
   , Shadow var
   , Functor m
-  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+  , Recursive (f (TermF var cat)) (TermF var cat)
+  , Corecursive (f (TermF var cat)) (TermF var cat)
   , Eq var
-  ) => Rewrite (f (LambdaF var cat)) m where
+  ) => Rewrite (f (TermF var cat)) m where
   rewrite expr = flip replace expr <$> substitution 
 
 class Context var typ m | var -> typ where
@@ -64,7 +64,7 @@ instance Enumerable Skolem where
   fromInt = Skolem
 
 class Skolemize f var cat where
-  skolemize :: var -> Skolem -> f (LambdaF var cat) -> f (LambdaF var cat)
+  skolemize :: var -> Skolem -> f (TermF var cat) -> f (TermF var cat)
 
 instance
   ( Monad m
@@ -72,14 +72,14 @@ instance
   , Fresh var m
   , Eq var
   , Substitute var cat f m 
-  , Rewrite (f (LambdaF var cat)) m 
-  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Unify (cat (f (LambdaF var cat))) (cat (f (LambdaF var cat))) m
-  , Unify var (f (LambdaF var cat)) m
-  , ThrowUnificationError (f (LambdaF var cat)) m
+  , Rewrite (f (TermF var cat)) m 
+  , Recursive (f (TermF var cat)) (TermF var cat)
+  , Corecursive (f (TermF var cat)) (TermF var cat)
+  , Unify (cat (f (TermF var cat))) (cat (f (TermF var cat))) m
+  , Unify var (f (TermF var cat)) m
+  , ThrowUnificationError (f (TermF var cat)) m
   , Skolemize f var cat
-  ) => Unify (f (LambdaF var cat)) (f (LambdaF var cat)) m where
+  ) => Unify (f (TermF var cat)) (f (TermF var cat)) m where
   unify ta tb = do
      case project ta /\ project tb of
        Var v /\ _ -> unify v tb
@@ -102,8 +102,8 @@ instance
 
 type TypingContext var f var' cat' =
   { nextVar :: Int
-  , typingAssumptions :: Map var (f (LambdaF var' cat')) 
-  , currentSubstitution :: Map var' (f (LambdaF var' cat'))
+  , typingAssumptions :: Map var (f (TermF var' cat')) 
+  , currentSubstitution :: Map var' (f (TermF var' cat'))
   }
 
 
@@ -134,8 +134,8 @@ else
 instance
   ( MonadState (TypingContext var f var' cat') m 
   , Enumerable var'
-  , Corecursive (f (LambdaF var' cat')) (LambdaF var' cat')
-  ) => Fresh (f (LambdaF var' cat')) m where
+  , Corecursive (f (TermF var' cat')) (TermF var' cat')
+  ) => Fresh (f (TermF var' cat')) m where
   fresh = var <<< fromInt <$> fresh
 else
 instance
@@ -152,7 +152,7 @@ instance
   , Ord var
   , NotInScopeError var m
   , MonadState (TypingContext var f var' cat') m
-  ) => Context var (f (LambdaF var' cat')) m where
+  ) => Context var (f (TermF var' cat')) m where
   assume v t =
      modify_ (\st -> st {
        typingAssumptions = Map.insert v t st.typingAssumptions
@@ -171,19 +171,20 @@ instance
   , Fresh var' m
   , Skolemize f var' cat'
   , MonadState (TypingContext var f var' cat') m
-  , Recursive (f (LambdaF var' cat')) (LambdaF var' cat')
-  , Corecursive (f (LambdaF var' cat')) (LambdaF var' cat')
+  , Recursive (f (TermF var' cat')) (TermF var' cat')
+  , Corecursive (f (TermF var' cat')) (TermF var' cat')
 
-  , Unify (cat' (f (LambdaF var' cat'))) (cat' (f (LambdaF var' cat'))) m
-  , Unify var' (f (LambdaF var' cat')) m
-  , ThrowUnificationError (f (LambdaF var' cat')) m 
-  , InfiniteTypeError var' (f (LambdaF var' cat')) m
+  , Unify (cat' (f (TermF var' cat'))) (cat' (f (TermF var' cat'))) m
+  , Unify var' (f (TermF var' cat')) m
+  , ThrowUnificationError (f (TermF var' cat')) m 
+  , InfiniteTypeError var' (f (TermF var' cat')) m
+  , AllVars var' var' cat' 
   , Shadow var' -- TODO is it safe to only consider shadows?
   ) => Substitute var' cat' f m where
   substitute v t' = do
      t <- rewrite t'
      when (v `occursIn` t) $ infiniteTypeError v t 
-     u <- rewrite (var v :: f (LambdaF var' cat'))
+     u <- rewrite (var v :: f (TermF var' cat'))
      case project u of
         Var v' | v' == v -> pure unit 
         _ -> void $ unify u t
@@ -202,14 +203,15 @@ renameFresh :: forall f var cat m.
     => Ord var
     => Shadow var
     => Foldable cat
-    => Recursive (f (LambdaF var cat)) (LambdaF var cat)
-    => Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+    => Recursive (f (TermF var cat)) (TermF var cat)
+    => Corecursive (f (TermF var cat)) (TermF var cat)
     => Fresh var m
-    => f (LambdaF var cat) -> m (f (LambdaF var cat))
+    => AllVars var var cat
+    => f (TermF var cat) -> m (f (TermF var cat))
 renameFresh t = do
   r <- flip traverse (fromFoldable $ Set.map shadow $ universe t) $ \v -> do
     x <- fresh
-    pure (v /\ (var x :: f (LambdaF var cat)))
+    pure (v /\ (var x :: f (TermF var cat)))
   let re = Map.fromFoldable r
   pure $ replace (\v -> Map.lookup (shadow v) re) t
 

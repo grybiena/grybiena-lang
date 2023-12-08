@@ -11,7 +11,7 @@ import Control.Monad.State (class MonadState)
 import Data.Foldable (class Foldable)
 import Data.Homogeneous.Record (fromHomogeneous)
 import Language.Kernel.Basis (basis)
-import Language.Lambda.Calculus (class Shadow, LambdaF(..))
+import Language.Lambda.Calculus (class AllVars, class Shadow, LambdaF(..))
 import Language.Lambda.Unification (class Fresh, TypingContext)
 import Language.Native (class NativeValue, Native(..), nativeCat)
 import Language.Native.Unsafe (unsafeModule)
@@ -23,11 +23,11 @@ import Type.Proxy (Proxy)
 
 
 class (Monad (t m), Monad m) <= Basis t m f var cat where
-  basisS :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
-  basisK :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
-  basisI :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
-  basisC :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
-  basisB :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
+  basisS :: Proxy t -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat))) 
+  basisK :: Proxy t -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat))) 
+  basisI :: Proxy t -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat))) 
+  basisC :: Proxy t -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat))) 
+  basisB :: Proxy t -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat))) 
 
 
 instance
@@ -39,10 +39,11 @@ instance
   , Ord var
   , Shadow var
   , Foldable cat
-  , Recursive (f (LambdaF var cat)) (LambdaF var cat)
-  , Corecursive (f (LambdaF var cat)) (LambdaF var cat)
+  , Recursive (f (LambdaF var var cat)) (LambdaF var var cat)
+  , Corecursive (f (LambdaF var var cat)) (LambdaF var var cat)
   , BasisParser t m f var cat
   , StringParserT t m
+  , AllVars var var cat
   ) => Basis t m f var cat where
   basisS p = typedNative <$> (fromHomogeneous (unsafeModule p basis))."S"
   basisK p = typedNative <$> (fromHomogeneous (unsafeModule p basis))."K"
@@ -52,7 +53,7 @@ instance
 
 typedNative :: forall var cat f .
                NativeValue f var cat
-            => Native (f (LambdaF var cat))
-            -> Cofree (LambdaF var cat) (f (LambdaF var cat))
+            => Native (f (LambdaF var var cat))
+            -> Cofree (LambdaF var var cat) (f (LambdaF var var cat))
 typedNative p@(Purescript n) = n.nativeType :< Cat (nativeCat p)
 

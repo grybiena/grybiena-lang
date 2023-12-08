@@ -27,7 +27,7 @@ import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
-import Language.Lambda.Calculus (absMany, app, appMany, cat, var)
+import Language.Lambda.Calculus (LambdaF, absMany, app, appMany, cat, var)
 import Language.Lambda.Inference (arrMany)
 import Language.Lambda.Module (Module(..))
 import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
@@ -38,7 +38,7 @@ import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos, withPos')
-import Language.Term (CaseAlternative(..), Ident(..), Scope(..), TT(..), Term, Var(..))
+import Language.Term (CaseAlternative(..), Ident(..), Scope(..), TT(..), Term, Var(..), Pattern)
 import Parsing (fail, runParserT)
 import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -250,20 +250,20 @@ parser mod = {
     parseValueAtom :: IndentParserT m Term
     parseValueAtom = defer $ \_ -> indented *> (parseCaseExpr <|> parseAbs <|> parseNatives <|> (try (var <$> parseTermVar) <|> var <$> parseDataConstructor) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
  
-    parsePattern :: Monad m => IndentParserT m Term
-    parsePattern = (buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parsePatternAtom)) 
+    parsePattern :: Monad m => IndentParserT m Pattern
+    parsePattern = (buildExprParser [] (buildPostfixParser [parseTypeAnnotation] parsePatternAtom)) 
  
-    parsePatternAtom :: IndentParserT m Term
+    parsePatternAtom :: IndentParserT m Pattern
     parsePatternAtom = defer $ \_ -> ((try (var <$> parseTermVar) <|> var <$> parseDataConstructor) <|> parseNumeric <|> (parens parsePattern))
  
     
     parseTypeLit :: IndentParserT m Term
     parseTypeLit = char '@' *> ((cat <<< TypeLit) <$> parseTypeAtom)
     
-    parseNumeric ::  IndentParserT m Term
+    parseNumeric :: forall abs. IndentParserT m (Mu (LambdaF abs Var TT))
     parseNumeric = (try parseNumber) <|> parseInt
     
-    parseInt ::  IndentParserT m Term
+    parseInt :: forall abs. IndentParserT m (Mu (LambdaF abs Var TT))
     parseInt = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> integer
      
     parseNatives :: IndentParserT m Term
@@ -272,7 +272,7 @@ parser mod = {
     parseNative ::  String -> IndentParserT m (Native Term) -> IndentParserT m Term
     parseNative name native = reserved name *> ((cat <<< Native) <$> native)
      
-    parseNumber ::  IndentParserT m Term
+    parseNumber :: forall abs. IndentParserT m (Mu (LambdaF abs Var TT))
     parseNumber = cat <<< Native <<< (\i -> nativeTerm (show i) i) <$> number 
 
     parseCaseExpr :: Monad m => IndentParserT m Term
@@ -303,7 +303,7 @@ parser mod = {
       pure $ app (app (app i x) a) b
 
     
-    parseTypeAnnotation :: Term -> IndentParserT m Term
+    parseTypeAnnotation ::forall abs. (Mu (LambdaF abs Var TT)) -> IndentParserT m (Mu (LambdaF abs Var TT))
     parseTypeAnnotation v = do
       reservedOp "::"
       t <- parseType

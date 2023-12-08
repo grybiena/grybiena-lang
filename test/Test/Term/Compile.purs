@@ -27,7 +27,7 @@ import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
 import Language.Lambda.Unification.Error (UnificationError)
 import Language.Native (Native(..))
 import Language.Parser.Term (Parser)
-import Language.Term (TT(..), Var)
+import Language.Term (TT(..), Var, Term)
 import Node.Encoding (Encoding(..))
 import Node.FS.Sync (readTextFile, readdir)
 import Parsing (ParseError)
@@ -119,5 +119,5 @@ compiles s e = do
                 ok <- liftAff $ structurallyEquivalent nativeType typ
                 if ok then pure $ Right unit else pure $ Left $ TypeError $ prettyPrint nativeType <> " =?= " <> prettyPrint typ 
               _ -> pure $ Left $ ReductionError $ 
-                (prettyPrint (flat out) <> " :: " <> prettyPrint (head out) <> "\n" <> show (flat out)) 
+                (prettyPrint (flat out :: Term) <> " :: " <> prettyPrint (head out) <> "\n" <> show (flat out :: Term)) 
  

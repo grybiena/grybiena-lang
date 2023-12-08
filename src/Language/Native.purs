@@ -14,7 +14,7 @@ instance Pretty term => Show (Native term) where
   show (Purescript { nativeType, nativePretty }) = "(" <> nativePretty <> " :: " <> prettyPrint nativeType <> ")"
 
 class NativeValue f var cat where
-  native :: Native (f (LambdaF var cat))-> f (LambdaF var cat)
-  nativeCat :: forall a. Native (f (LambdaF var cat))-> cat a 
+  native :: Native (f (LambdaF var var cat))-> f (LambdaF var var cat)
+  nativeCat :: forall a. Native (f (LambdaF var var cat))-> cat a 
 
 

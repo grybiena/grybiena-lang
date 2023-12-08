@@ -17,7 +17,7 @@ instance Pretty DOC where
 else
 instance Pretty TacitString where
   pretty = text <<< show
-instance PrettyLambda var cat => Pretty (Lambda var cat) where
+instance PrettyLambda abs var cat => Pretty (Lambda abs var cat) where
   pretty (In l) =
     case l of
       Abs i a -> prettyAbs i a
