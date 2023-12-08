@@ -15,4 +15,6 @@ instance Pretty term => Show (Native term) where
 
 class NativeValue f var cat where
   native :: Native (f (LambdaF var cat))-> f (LambdaF var cat)
+  nativeCat :: forall a. Native (f (LambdaF var cat))-> cat a 
+
 

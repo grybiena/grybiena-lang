@@ -5,6 +5,7 @@ import Prelude
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Data.Foldable (class Foldable, foldr)
 import Data.List (List)
+import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class Shadow, LambdaF(..), absMany, app, cat, free, shadow, var)
@@ -16,7 +17,7 @@ import Matryoshka.Fold (cata)
 
 infer :: forall exp var cat m typ .
         Monad m
-     => IsType typ
+     => IsTypeApp var cat typ
      => Functor cat
      => Recursive exp (LambdaF var cat)
      => Fresh typ m
@@ -37,9 +38,17 @@ infer exp = do
       q = free (head u)
   pure (absMany q (head u) :< tail u)
 
+closeTerm :: forall lam var cat.
+             Corecursive lam (LambdaF var cat)
+          => Ord var
+          => Foldable cat
+          => Recursive lam (LambdaF var cat)
+          => lam -> lam
+closeTerm exp = absMany (free exp) exp
+
 rule :: forall var cat m typ .
         Monad m
-     => IsType typ
+     => IsTypeApp var cat typ
      => Functor cat
      => Fresh typ m
      => Context var typ m
@@ -50,6 +59,8 @@ rule :: forall var cat m typ .
      => Arrow typ
      => Inference var cat typ m
      => Shadow var
+     => Ord var
+     => Foldable cat
      => Algebra (LambdaF var cat) (m (Cofree (LambdaF var cat) typ)) 
 rule expr = 
   case expr of
@@ -87,12 +98,15 @@ class IsStar f var cat where
 instance IsStar f var cat => IsType (f (LambdaF var cat)) where
   isType = isStar
 
+class IsTypeApp var cat typ where
+  isTypeApp :: Cofree (LambdaF var cat) typ -> Maybe typ
+
 class IsType typ where
   isType :: typ -> Boolean
 
 appRule :: forall m typ var cat.
            Bind m
-        => IsType typ
+        => IsTypeApp var cat typ
         => Functor cat
         => Unify typ typ m
         => Applicative m
@@ -101,16 +115,17 @@ appRule :: forall m typ var cat.
         => Rewrite typ m
         => Recursive typ (LambdaF var cat)
         => Corecursive typ (LambdaF var cat)
+        => Ord var
+        => Foldable cat
         => Cofree (LambdaF var cat) typ
         -> Cofree (LambdaF var cat) typ
         -> m (Cofree (LambdaF var cat) typ)
 appRule f a = do
   let arrTy = head f
       argTy = head a
-  case project arrTy of
+  case project (closeTerm arrTy) /\ isTypeApp a of
     -- Applying a type level lambda (forall)
-    Abs v b | isType argTy -> do
-      let argLit = flat a
+    Abs v b /\ Just argLit -> do
       _ <- unify (var v :: typ) argLit
       tyApp <- rewrite b
       pure $ tyApp :< App f a

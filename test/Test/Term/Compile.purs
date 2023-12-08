@@ -2,7 +2,7 @@ module Test.Term.Compile where
 
 import Prelude
 
-import Control.Comonad.Cofree (head)
+import Control.Comonad.Cofree (head, tail)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
@@ -28,7 +28,6 @@ import Language.Lambda.Unification.Error (UnificationError)
 import Language.Native (Native(..))
 import Language.Parser.Term (Parser)
 import Language.Term (TT(..), Var)
-import Matryoshka (project)
 import Node.Encoding (Encoding(..))
 import Node.FS.Sync (readTextFile, readdir)
 import Parsing (ParseError)
@@ -104,8 +103,8 @@ compiles s e = do
         let compileFix v = do
               let p = (Proxy :: Proxy Parser)
               q <- runExceptT do
---                 i <- flat <$> infer v
-                 runExceptT $ elimReduce p v
+                 i <- infer v
+                 runExceptT $ elimReduce p i
               case q of
                 Left err -> throwError $ UnifError err 
                 Right (Left err) -> throwError $ ParseError err
@@ -115,9 +114,10 @@ compiles s e = do
         case out' of
           Left err -> pure $ Left err 
           Right out -> do            
-            case project out of
+            case tail out of
               Cat (Native (Purescript { nativeType })) -> do
                 ok <- liftAff $ structurallyEquivalent nativeType typ
-                if ok then pure $ Right unit else pure $ Left $ TypeError $ prettyPrint typ <> " =?= " <> prettyPrint nativeType
-              _ -> pure $ Left $ ReductionError $ prettyPrint out 
+                if ok then pure $ Right unit else pure $ Left $ TypeError $ prettyPrint nativeType <> " =?= " <> prettyPrint typ 
+              _ -> pure $ Left $ ReductionError $ 
+                (prettyPrint (flat out) <> " :: " <> prettyPrint (head out) <> "\n" <> show (flat out)) 
  

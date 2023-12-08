@@ -4,15 +4,16 @@ module Language.Lambda.Basis where
 
 import Prelude
 
+import Control.Comonad.Cofree (Cofree, (:<))
 import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
 import Data.Foldable (class Foldable)
 import Data.Homogeneous.Record (fromHomogeneous)
 import Language.Kernel.Basis (basis)
-import Language.Lambda.Calculus (class Shadow, LambdaF)
+import Language.Lambda.Calculus (class Shadow, LambdaF(..))
 import Language.Lambda.Unification (class Fresh, TypingContext)
-import Language.Native (class NativeValue, native)
+import Language.Native (class NativeValue, Native(..), nativeCat)
 import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Matryoshka.Class.Corecursive (class Corecursive)
@@ -22,11 +23,11 @@ import Type.Proxy (Proxy)
 
 
 class (Monad (t m), Monad m) <= Basis t m f var cat where
-  basisS :: Proxy t -> m (f (LambdaF var cat)) 
-  basisK :: Proxy t -> m (f (LambdaF var cat)) 
-  basisI :: Proxy t -> m (f (LambdaF var cat)) 
-  basisC :: Proxy t -> m (f (LambdaF var cat)) 
-  basisB :: Proxy t -> m (f (LambdaF var cat)) 
+  basisS :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
+  basisK :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
+  basisI :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
+  basisC :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
+  basisB :: Proxy t -> m (Cofree (LambdaF var cat) (f (LambdaF var cat))) 
 
 
 instance
@@ -43,9 +44,15 @@ instance
   , BasisParser t m f var cat
   , StringParserT t m
   ) => Basis t m f var cat where
-  basisS p = native <$> (fromHomogeneous (unsafeModule p basis))."S"
-  basisK p = native <$> (fromHomogeneous (unsafeModule p basis))."K"
-  basisI p = native <$> (fromHomogeneous (unsafeModule p basis))."I"
-  basisC p = native <$> (fromHomogeneous (unsafeModule p basis))."C"
-  basisB p = native <$> (fromHomogeneous (unsafeModule p basis))."B"
+  basisS p = typedNative <$> (fromHomogeneous (unsafeModule p basis))."S"
+  basisK p = typedNative <$> (fromHomogeneous (unsafeModule p basis))."K"
+  basisI p = typedNative <$> (fromHomogeneous (unsafeModule p basis))."I"
+  basisC p = typedNative <$> (fromHomogeneous (unsafeModule p basis))."C"
+  basisB p = typedNative <$> (fromHomogeneous (unsafeModule p basis))."B"
+
+typedNative :: forall var cat f .
+               NativeValue f var cat
+            => Native (f (LambdaF var cat))
+            -> Cofree (LambdaF var cat) (f (LambdaF var cat))
+typedNative p@(Purescript n) = n.nativeType :< Cat (nativeCat p)
 

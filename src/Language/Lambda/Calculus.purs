@@ -150,8 +150,6 @@ onVar replacement =
         Just (Var v') -> abs v' a
         Just _ -> a
         _ -> abs v a
---    Abs v a | isJust (replacement v) -> a
---    Abs v a -> abs v a
     Var v -> maybe (var v) identity (replacement v)
     App a b -> app a b
     Cat c -> cat c

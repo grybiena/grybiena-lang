@@ -16,21 +16,20 @@ import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
 import Data.List (List(..))
 import Data.List as List
-import Data.List.NonEmpty (NonEmptyList(..), foldM, zipWith)
+import Data.List.NonEmpty (NonEmptyList, foldM, zipWith)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), maybe)
-import Data.NonEmpty (NonEmpty(..))
 import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
-import Data.Tuple (fst, snd, uncurry)
+import Data.Tuple (snd, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Kernel.Data (Data(..))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), absMany, app, appMany, cat, free, prettyVar, replaceFree, var)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, arrMany, arrow, infer)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), absMany, app, appMany, cat, free, prettyVar, replace, replaceFree, shadow, var)
+import Language.Lambda.Elimination (class Composition, class Reduction)
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, arrMany, arrow, closeTerm, flat, infer)
 import Language.Lambda.Module (Module(..), sequenceBindings)
-import Language.Lambda.Reduction (class Composition, class Reduction)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, require, rewrite, substitute, unify)
 import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class ThrowUnificationError, UnificationError(..), recursiveModuleError, unificationError)
 import Language.Native (class NativeValue, Native(..))
@@ -99,6 +98,7 @@ derive instance Generic (TT a) _
 
 instance NativeValue Mu Var TT where
   native = cat <<< Native
+  nativeCat = Native
 
 instance (Pretty a, Show a) => Show (TT a) where
   show (TypeAnnotation a t) = "TypeAnnotation " <> show a <> " " <> show t
@@ -108,6 +108,13 @@ instance IsStar Mu Var TT where
   isStar t = case project t of
                Cat (Star _) -> true
                _ -> false
+
+instance IsTypeApp Var TT Term where
+  isTypeApp t =
+    case tail t of
+      Cat (TypeLit l) -> Just l
+      _ -> Nothing 
+
 
 instance Functor TT where
   map _ Arrow = Arrow
@@ -360,7 +367,7 @@ instance
     unify (head vt :: Term) t
     vt' <- rewrite (head vt)
     pure (vt' :< tail vt)
-  inference (TypeLit t) = infer t 
+  inference (TypeLit t) = pure $ t :< (Cat (TypeLit t))
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
   inference (Case args branches) = do
     -- TODO check all branches have the same number of patterns as the args in the case
@@ -404,30 +411,22 @@ instance
   , InfiniteTypeError Var Term m
   , NotInScopeError Var m
   ) => Composition Mu Var TT m where
-  composition a b =
-    case project a /\ project b of
+  composition a b ty =
+    case tail a /\ tail b of
       Cat (Native (Purescript na)) /\ Cat (TypeLit t) -> do
-        case na.nativeType of
+        case closeTerm $ na.nativeType of
           In (Abs tv tb) -> do
-            unify (var tv :: Term) t
-            tb' <- rewrite tb
-            pure $ cat (Native (Purescript (na { nativeType = tb' })))
-          _ -> pure $ app a b
+            let tb' = replace (\v -> if shadow v == shadow tv then Just t else Nothing) tb
+            pure $ tb' :< Cat (Native (Purescript (na { nativeType = tb' })))
+          _ -> pure $ ty :< tail a
       Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) -> do
-        nativeType <- head <$> infer (app a b)
         let nativePretty = "(" <> na.nativePretty <> " " <> nb.nativePretty <> ")"
-        pure $ cat (Native (Purescript { nativeType
+            nativeType = closeTerm ty
+        pure $ ty :< Cat (Native (Purescript { nativeType
                                        , nativePretty
                                        , nativeTerm: na.nativeTerm nb.nativeTerm
                                        }))
---      Cat (Pattern p) /\ Cat (Native nt@(Purescript n)) -> do
---        nativeType <- head <$> infer (app a b)
---        let nativePretty = "(" <> p <> " " <> n.nativePretty <> ")"
---        pure $ cat (Native (Purescript { nativeType
---                                       , nativePretty
---                                       , nativeTerm: unsafeCoerce (DataApp (DataConstructor p) (DataNative nt)) 
---                                       }))
-      _ -> pure $ app a b 
+      _ -> pure $ ty :< App a b 
 
 instance
   ( Monad m
@@ -438,34 +437,35 @@ instance
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
   ) => Reduction Mu Var TT m where
-  reduction =
-    case _ of
+  reduction l t =
+    case l of
       Let bi bo -> do
          let inline :: Var -> Term -> Term -> Term
              inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
-             annotate :: Var -> Term -> m (Var /\ Term)
-             annotate v t =
-               case project t of
-                  (Cat (TypeAnnotation q r)) -> do
-                    qt <- head <$> infer q
-                    unify qt r
-                    pure (v /\ q)
-                  _ -> pure (v /\ t)               
-         case sequenceBindings bi of
+--             annotate :: Var -> Term -> m (Var /\ Term)
+--             annotate v t =
+--               case project t of
+--                  (Cat (TypeAnnotation q r)) -> do
+--                    qt <- head <$> infer q
+--                    unify qt r
+--                    pure (v /\ q)
+--                  _ -> pure (v /\ t)               
+         case sequenceBindings (flat <$> bi) of
            Left err -> recursiveModuleError err
            Right seq -> do
-              flip traverse_ seq $ \(v /\ _) -> do
-                 t <- fresh
-                 assume v t
-              seq' <- traverse (uncurry annotate) seq
-              pure $ foldl (flip $ uncurry inline) bo seq' 
-      TypeAnnotation (In (Cat (Native (Purescript na)))) t -> do
-         unify na.nativeType t
-         pure (cat (Native (Purescript (na { nativeType = t }))))
-      Case args alts -> do
-         argTys <- traverse (map head <<< infer) args
-         pure (appMany (reduceCase argTys alts) args)
-      c -> pure $ cat c
+--              flip traverse_ seq $ \(v /\ _) -> do
+--                 t <- fresh
+--                 assume v t
+--              seq' <- traverse (uncurry annotate) seq
+             infer $ foldl (flip $ uncurry inline) (flat bo) seq
+
+      TypeAnnotation f a -> do
+         unify (head f) a
+         pure $ a :< tail f
+--      Case args alts -> do
+--         argTys <- traverse (map head <<< infer) args
+--         pure (appMany (reduceCase argTys alts) args)
+      c -> pure $ t :< Cat c
 
 
 bindPattern :: Term -> Data Term -> Maybe (List (Var /\ Native Term)) 
