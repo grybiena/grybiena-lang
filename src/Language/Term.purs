@@ -23,8 +23,11 @@ import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
-import Data.Tuple (fst, snd, uncurry)
+import Data.Tuple (Tuple(..), fst, snd, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
+import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Class.Console (log)
+import Effect.Exception (error)
 import Language.Kernel.Data (Data(..))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), PatternF, abs, absMany, app, appMany, cat, free, freeIn, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
@@ -368,7 +371,7 @@ instance
   inference (Data (DataConstructor c Nothing)) = do
      t <- require (Ident $ TermVar c)
      pure (t :< Cat (Data (DataConstructor c Nothing))) 
-  inference (Data (DataNative (Purescript n))) = pure (n.nativeType :< Cat (Data (DataNative (Purescript n))))
+--  inference (Data (DataNative (Purescript n))) = pure (n.nativeType :< Cat (Data (DataNative (Purescript n))))
   inference (Data (DataApp a b)) = do
      at <- head <$> infer (cat (Data a) :: Term)
      bt <- head <$> infer (cat (Data b) :: Term)
@@ -424,19 +427,18 @@ instance
           unify a b
           rewrite a
     argTys' <- traverse rewrite argTys
-    tbody <- foldM unifyAll t bodies
+    caseTy <- foldM unifyAll t bodies
     let unifyBinder arg = join <<< map (unify arg <<< head)
         unifyBinders (CaseAlternative { patterns }) = do
            sequence_ (zipWith unifyBinder argTys' (infer <$> patterns))
     traverse_ unifyBinders branches
-    let caseTy = arrMany argTys' tbody
     pure $ caseTy :< (Cat (Case typedArgs typedBranches))
   inference (Pattern p) = require (Ident $ TermVar p) >>= \t -> pure (t :< Cat (Pattern p))
   inference (Data (DataConstructor c (Just t))) = pure (t :< Cat (Data (DataConstructor c (Just t)))) 
   inference (Data (DataConstructor c Nothing)) = do
      t <- require (Ident $ TermVar c)
      pure (t :< Cat (Data (DataConstructor c Nothing))) 
-  inference (Data (DataNative (Purescript n))) = pure (n.nativeType :< Cat (Data (DataNative (Purescript n))))
+  inference (Data (DataNative n)) = unsafeCoerce "TODO this should be impossible" 
   inference (Data (DataApp a b)) = do
      at <- head <$> infer (cat (Data a) :: Term)
      bt <- head <$> infer (cat (Data b) :: Term)
@@ -463,9 +465,9 @@ instance
         let nativePretty = "(" <> na.nativePretty <> " " <> nb.nativePretty <> ")"
             nativeType = closeTerm ty
         pure $ ty :< Cat (Native (Purescript { nativeType
-                                       , nativePretty
-                                       , nativeTerm: na.nativeTerm nb.nativeTerm
-                                       }))
+                                             , nativePretty
+                                             , nativeTerm: na.nativeTerm nb.nativeTerm
+                                             }))
       _ -> pure $ ty :< App a b 
 
 instance
@@ -496,42 +498,43 @@ instance
       TypeAnnotation f a -> do
          unify (head f) a
          pure $ a :< tail f
---      Case args alts -> do
---         argTys <- traverse (map head <<< infer) args
---         pure (appMany (reduceCase argTys alts) args)
+      Case args alts -> do 
+        (vars :: NonEmptyList Var) <- traverse (const fresh) args
+        let argMod :: Module Var TypedTerm
+            argMod = Module $ Map.fromFoldable (zipWith Tuple vars args)
+            argVars :: NonEmptyList (Var /\ Term)
+            argVars = zipWith Tuple vars (head <$> args)
+        pure $ t :< Cat (Let argMod (reduceCase argVars t alts))
       c -> pure $ t :< Cat c
 
+type TypedTerm = (Cofree (LambdaF Var Var TT) Term)
 
-bindPattern :: Pattern -> Data Term -> Maybe (List (Var /\ Native Term)) 
-bindPattern (In (App a b)) (DataApp a' b') = append <$> bindPattern a a' <*> bindPattern b b'
-bindPattern t@(In (App _ _)) (DataNative (Purescript p)) = bindPattern t p.nativeTerm
-bindPattern (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) | c == c' = Just Nil
-bindPattern t@(In (Cat (Data (DataConstructor _ _)))) (DataNative (Purescript p)) = bindPattern t p.nativeTerm
-bindPattern (In (Var v)) (DataNative n) = Just $ pure (v /\ n) 
-bindPattern _ _ = Nothing
+reduceCase :: NonEmptyList (Var /\ Term) -> Term -> NonEmptyList (CaseAlternative TypedTerm) -> TypedTerm
+reduceCase argVars caseTy branches = appArgs (foldr (reduceBranch argVars) fallThrough branches) 
+  where
+--    absArgs b = foldl absArg b argVars 
+--    absArg b (v /\ t) = (t :->: (head b)) :< Abs v b
+    appArgs :: TypedTerm -> TypedTerm
+    appArgs b = foldl appArg b argVars
+    appArg b (v /\ t) = caseTy :< App b (t :< Var v)
+    fallThrough :: TypedTerm
+    fallThrough = (arrMany (snd <$> argVars) caseTy) :< Cat (Native $ Purescript {
+                            nativeType: caseTy
+                          , nativeTerm: unsafeCoerce $ const (error "Pattern match failed.")
+                          , nativePretty: "Pattern match failed."
+                          })
+    reduceBranch :: NonEmptyList (Var /\ Term) -> CaseAlternative TypedTerm -> TypedTerm -> TypedTerm
+    reduceBranch _ _ _ = fallThrough 
 
-
--- case a b c of {} ~~> \a b c -> {}
-
--- conceptually we want to do this but bindPattern needs to be deferred until runtime
-reduceCaseAlternative :: (CaseAlternative Term) -> List (Data Term) -> Maybe Term
-reduceCaseAlternative (CaseAlternative { patterns, body }) args = 
-  let bound :: List Var
-      bound = join $ map free (List.fromFoldable patterns)
-      branch :: Term
-      branch = absMany bound body
-      match :: Maybe (List (Var /\ Native Term))
-      match = join <$> (sequence $ List.zipWith bindPattern (List.fromFoldable patterns) args)
-   in appMany branch <<< map (cat <<< Native <<< snd) <$> match
 
 newtype Match = Match (forall a. a)
 
 bindPattern' :: Pattern -> Data Term -> Maybe (List Match) 
 bindPattern' (In (App a b)) (DataApp a' b') = append <$> bindPattern' a a' <*> bindPattern' b b'
-bindPattern' t@(In (App _ _)) (DataNative (Purescript p)) = bindPattern' t p.nativeTerm
+bindPattern' t@(In (App _ _)) (DataNative n) = bindPattern' t n 
 bindPattern' (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) | c == c' = Just Nil
-bindPattern' t@(In (Cat (Data (DataConstructor _ _)))) (DataNative (Purescript p)) = bindPattern' t p.nativeTerm
-bindPattern' (In (Var v)) (DataNative (Purescript { nativeTerm })) = Just $ pure $ Match (unsafeCoerce nativeTerm)
+bindPattern' t@(In (Cat (Data (DataConstructor _ _)))) (DataNative n) = bindPattern' t n 
+bindPattern' (In (Var v)) (DataNative n) = Just $ pure $ Match n 
 bindPattern' _ _ = Nothing
 
 newtype Branch = Branch (forall a. a)
@@ -548,8 +551,6 @@ reduceCaseAlternative' (CaseAlternative { patterns, body }) =
    in foo /\ branch 
 
 
-reduceCase :: NonEmptyList Term -> NonEmptyList (CaseAlternative Term) -> Term
-reduceCase _ = unsafeCoerce unit 
 
 bing :: forall a b. a -> (List a -> b) -> (List a -> b)
 bing a f = f <<< List.(:) a

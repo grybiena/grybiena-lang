@@ -14,7 +14,7 @@ import Data.Foldable (foldl)
 import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
 import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
-import Data.List (List(..), (..), (:))
+import Data.List (List(..), length, zip, (..), (:))
 import Data.List as List
 import Data.List.NonEmpty (NonEmptyList)
 import Data.List.NonEmpty as NonEmptyList
@@ -27,18 +27,18 @@ import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
-import Language.Lambda.Calculus (LambdaF, absMany, app, appMany, cat, var)
-import Language.Lambda.Inference (arrMany)
+import Language.Lambda.Calculus (LambdaF, abs, absMany, app, appMany, cat, var)
+import Language.Lambda.Inference (arrMany, (:->:))
 import Language.Lambda.Module (Module(..))
 import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
-import Language.Native (Native, native)
+import Language.Native (Native(..), native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
 import Language.Native.Reify (nativeTerm, reify)
 import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos, withPos')
-import Language.Term (CaseAlternative(..), Ident(..), Scope(..), TT(..), Term, Var(..), Pattern)
+import Language.Term (CaseAlternative(..), Ident(..), Match(..), Pattern, Scope(..), TT(..), Term, Var(..))
 import Parsing (fail, runParserT)
 import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -47,6 +47,7 @@ import Parsing.Token (GenTokenParser, makeTokenParser)
 import Prettier.Printer (beside, text, (<+>))
 import Pretty.Printer (pretty, prettyPrint)
 import Type.Proxy (Proxy(..))
+import Unsafe.Coerce (unsafeCoerce)
 
 instance
   ( Fresh Int m
@@ -79,7 +80,7 @@ data Decl =
   | DataDecl DataTypeDecl (List DataValueDecl)
 
 data DataTypeDecl = DataTypeDecl String (List Var)
-data DataValueDecl = DataValueDecl String (List Var)
+data DataValueDecl = DataValueDecl String (List Var) -- (List Term)
 
 dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
 dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
@@ -92,8 +93,21 @@ dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
           constructorType = absMany ts (arrMany (var <$> ts) dataType) 
           typeDecl :: Decl
           typeDecl = TypeDecl (Ident $ TermVar c) constructorType
+          liftConstructor :: Match -> Match
+          liftConstructor x = foldl liftDataApp x ts
+            where
+              liftDataApp (Match m) _ =
+                Match (unsafeCoerce (\g -> DataApp (unsafeCoerce m) (DataNative (unsafeCoerce g))))
+          liftedConstructor :: Term
+          liftedConstructor = cat $ Native $ Purescript {
+               nativeType: constructorType
+             , nativePretty: c
+             , nativeTerm:
+                 let Match a = liftConstructor (Match (unsafeCoerce (DataConstructor c (Just constructorType))))
+                     in unsafeCoerce a
+             }
           valDecl :: Decl 
-          valDecl = ValueDecl (Ident $ TermVar c) (cat (Data (DataConstructor c (Just constructorType))))
+          valDecl = ValueDecl (Ident $ TermVar c) liftedConstructor
        in Loop ((typeDecl:valDecl:ds) /\ r)
 
 instance Show Decl where
@@ -248,7 +262,7 @@ parser mod = {
     parseValue = indented *> (buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom)) 
     
     parseValueAtom :: IndentParserT m Term
-    parseValueAtom = defer $ \_ -> indented *> (parseCaseExpr <|> parseAbs <|> parseNatives <|> (try (var <$> parseTermVar) <|> parseDataConstructor) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
+    parseValueAtom = defer $ \_ -> indented *> (parseCaseExpr <|> parseAbs <|> parseNatives <|> (try (var <$> parseTermVar) <|> (var <<< Ident <<< TermVar <$> parseDataConstructor')) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
  
     parsePattern :: Monad m => IndentParserT m Pattern
     parsePattern = (buildExprParser [] (buildPostfixParser [parsePatternApp, parseTypeAnnotation] parsePatternAtom)) 
