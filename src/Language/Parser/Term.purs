@@ -84,7 +84,6 @@ data DataValueDecl = DataValueDecl String (List Var)
 dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
 dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
   where
-    -- TODO this should be TypeConstructor (or Type and Data should be merged)
     dataType :: Term
     dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars) 
     go (ds /\ Nil) = Done ds

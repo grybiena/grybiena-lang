@@ -23,12 +23,12 @@ import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
-import Data.Tuple (snd, uncurry)
+import Data.Tuple (fst, snd, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Kernel.Data (Data(..))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), PatternF, absMany, app, appMany, cat, free, prettyVar, replace, replaceFree, shadow, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), PatternF, abs, absMany, app, appMany, cat, free, freeIn, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, arrMany, arrow, closeTerm, flat, infer)
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, arrMany, arrow, closeTerm, flat, infer, (:->:))
 import Language.Lambda.Module (Module(..), sequenceBindings)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, require, rewrite, substitute, unify)
 import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class ThrowUnificationError, UnificationError(..), recursiveModuleError, unificationError)
@@ -480,11 +480,19 @@ instance
   reduction l t =
     case l of
       Let bi bo -> do
-         let inline :: Var -> Term -> Term -> Term
-             inline v r = replaceFree (\w -> if w == v then Just r else Nothing)
+         -- TODO avoid repeated flattening & Map.lookup
+         -- & incrementally check free variables
+         let Module z = bi
+             inline v x =
+               case Map.lookup v z of
+                 Nothing -> x
+                 Just o -> if v `freeIn` (flat x :: Term) then head x :< App ((head o :->: head x) :< Abs v x) o else x
          case sequenceBindings (flat <$> bi) of
            Left err -> recursiveModuleError err
-           Right seq -> infer $ foldl (flip $ uncurry inline) (flat bo) seq
+           Right (seq :: List (Var /\ Term)) -> do
+              let vars :: List Var
+                  vars = fst <$> seq
+              pure $ foldl (flip inline) bo vars
       TypeAnnotation f a -> do
          unify (head f) a
          pure $ a :< tail f
@@ -525,6 +533,10 @@ bindPattern' (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) 
 bindPattern' t@(In (Cat (Data (DataConstructor _ _)))) (DataNative (Purescript p)) = bindPattern' t p.nativeTerm
 bindPattern' (In (Var v)) (DataNative (Purescript { nativeTerm })) = Just $ pure $ Match (unsafeCoerce nativeTerm)
 bindPattern' _ _ = Nothing
+
+newtype Branch = Branch (forall a. a)
+
+
 
 reduceCaseAlternative' :: (CaseAlternative Term) -> (List (Data Term) -> Maybe (List Match)) /\ Term
 reduceCaseAlternative' (CaseAlternative { patterns, body }) = 
