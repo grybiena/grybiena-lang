@@ -41,8 +41,8 @@ eliminate :: forall f var cat t m.
           => ArrowObject (cat (f (LambdaF var var cat))) 
           => NotInScopeError var m
           => Context var (f (LambdaF var var cat)) m
-          => Inference var cat (f (LambdaF var var cat)) m 
-          => IsTypeApp var cat (f (LambdaF var var cat))
+          => Inference var var cat (f (LambdaF var var cat)) m 
+          => IsTypeApp var var cat (f (LambdaF var var cat))
           => Eq (f (LambdaF var var cat))
           => Composition f var cat m
           => Reduction f var cat m

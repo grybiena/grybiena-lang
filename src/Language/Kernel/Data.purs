@@ -3,6 +3,7 @@ module Language.Kernel.Data where
 
 import Data.BooleanAlgebra ((&&))
 import Data.Eq (class Eq, eq, (==))
+import Data.Maybe (Maybe)
 import Data.Show (class Show)
 import Language.Native (Native(..))
 import Prettier.Printer (text, (<+>))
@@ -11,7 +12,7 @@ import Prim (String, Int, Record)
 
 data Data term =
     DataApp (Data term) (Data term)
-  | DataConstructor String term
+  | DataConstructor String (Maybe term)
   | DataNative (Native term)
 
 instance Eq (Data term) where

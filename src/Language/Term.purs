@@ -25,6 +25,8 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
 import Data.Tuple (snd, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
+import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Class.Console (log)
 import Language.Kernel.Data (Data(..))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), PatternF, absMany, app, appMany, cat, free, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
@@ -109,7 +111,7 @@ instance IsStar Mu Var Var TT where
                Cat (Star _) -> true
                _ -> false
 
-instance IsTypeApp Var TT Term where
+instance IsTypeApp abs Var TT Term where
   isTypeApp t =
     case tail t of
       Cat (TypeLit l) -> Just l
@@ -241,6 +243,7 @@ instance PrettyLambda Void Var TT where
   prettyAbs v _ = absurd v
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat (Pattern p) = text p
+  prettyCat (Data d) = pretty d
   prettyCat _  = text "TODO pattern category"
 
 instance PrettyLambda Var Var TT where
@@ -342,18 +345,47 @@ instance
     unify na.nativeType nb.nativeType
     when (na.nativePretty /= nb.nativePretty) do
        unificationError (cat a) (cat b)
+  unify (Data (DataConstructor a _)) (Data (DataConstructor b _)) | a == b = pure unit
   unify a b = unificationError (cat a) (cat b)
 
- 
-
 instance
-  ( Monad m
+  ( MonadEffect m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
   , NotInScopeError Var m
-  ) => Inference Var TT Term m where
+  ) => Inference Void Var TT Term m where
+  inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
+  inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
+  inference (TypeAnnotation v t) = do
+    (vt :: Cofree (LambdaF Void Var TT) Term) <- v
+    unify (head vt :: Term) t
+    vt' <- rewrite (head vt)
+    pure (vt' :< tail vt)
+  inference (TypeLit t) = pure $ t :< (Cat (TypeLit t))
+  inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
+  inference (Pattern p) = require (Ident $ TermVar p) >>= \t -> pure (t :< Cat (Pattern p))
+  inference (Data (DataConstructor c (Just t))) = pure (t :< Cat (Data (DataConstructor c (Just t)))) 
+  inference (Data (DataConstructor c Nothing)) = do
+     t <- require (Ident $ TermVar c)
+     pure (t :< Cat (Data (DataConstructor c Nothing))) 
+  inference (Data (DataNative (Purescript n))) = pure (n.nativeType :< Cat (Data (DataNative (Purescript n))))
+  inference (Data (DataApp a b)) = do
+     at <- head <$> infer (cat (Data a) :: Term)
+     bt <- head <$> infer (cat (Data b) :: Term)
+     pure $ ((app at bt) :< Cat (Data (DataApp a b)))
+  inference _ = unsafeCoerce "TODO: this shouldn't be in a pattern" 
+ 
+
+instance
+  ( MonadEffect m
+  , Unify Term Term m
+  , MonadState (TypingContext Var Mu Var TT) m
+  , ThrowUnificationError Term m
+  , InfiniteTypeError Var Term m
+  , NotInScopeError Var m
+  ) => Inference Var Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
   inference (Let (Module bs) a) = do
@@ -387,11 +419,7 @@ instance
     typedBranches <- traverse typeBranch branches
     let argTys = head <$> typedArgs 
         getBody (CaseAlternative { body }) = body
---        unifyBinder arg = join <<< map (unify arg <<< head)
---        unifyBinders (CaseAlternative { patterns }) = do
---           sequence_ (zipWith unifyBinder argTys patterns)             
 
---    traverse_ unifyBinders branches
     bodies <- map head <$> sequence (getBody <$> branches)
     (t :: Term) <- fresh 
     let unifyAll a b = do
@@ -399,10 +427,17 @@ instance
           rewrite a
     argTys' <- traverse rewrite argTys
     tbody <- foldM unifyAll t bodies
+    let unifyBinder arg = join <<< map (unify arg <<< head)
+        unifyBinders (CaseAlternative { patterns }) = do
+           sequence_ (zipWith unifyBinder argTys' (infer <$> patterns))
+    traverse_ unifyBinders branches
     let caseTy = arrMany argTys' tbody
     pure $ caseTy :< (Cat (Case typedArgs typedBranches))
   inference (Pattern p) = require (Ident $ TermVar p) >>= \t -> pure (t :< Cat (Pattern p))
-  inference (Data (DataConstructor c t)) = pure (t :< Cat (Data (DataConstructor c t))) 
+  inference (Data (DataConstructor c (Just t))) = pure (t :< Cat (Data (DataConstructor c (Just t)))) 
+  inference (Data (DataConstructor c Nothing)) = do
+     t <- require (Ident $ TermVar c)
+     pure (t :< Cat (Data (DataConstructor c Nothing))) 
   inference (Data (DataNative (Purescript n))) = pure (n.nativeType :< Cat (Data (DataNative (Purescript n))))
   inference (Data (DataApp a b)) = do
      at <- head <$> infer (cat (Data a) :: Term)
@@ -436,7 +471,7 @@ instance
       _ -> pure $ ty :< App a b 
 
 instance
-  ( Monad m
+  ( MonadEffect m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowRecursiveModuleError Mu Var TT m

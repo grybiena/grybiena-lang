@@ -15,11 +15,12 @@ import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Fold (cata)
 
-infer :: forall exp var cat m typ .
+infer :: forall exp abs var cat m typ .
         Monad m
-     => IsTypeApp var cat typ
+     => IsTypeApp abs var cat typ
+     => AbsRule abs var cat typ m
      => Functor cat
-     => Recursive exp (TermF var cat)
+     => Recursive exp (LambdaF abs var cat)
      => Fresh typ m
      => Context var typ m
      => Rewrite typ m
@@ -28,11 +29,11 @@ infer :: forall exp var cat m typ .
      => Corecursive typ (TermF var cat)
      => Arrow typ
      => Shadow var
-     => Inference var cat typ m
+     => Inference abs var cat typ m
      => Ord var
      => Foldable cat
      => FreeVars var var cat
-     => exp -> (m (Cofree (TermF var cat) typ)) 
+     => exp -> (m (Cofree (LambdaF abs var cat) typ)) 
 infer exp = do
   u <- cata rule exp
   let q :: List var
@@ -50,9 +51,13 @@ closeTerm :: forall lam var cat.
           => lam -> lam
 closeTerm exp = absMany (free exp) exp
 
-rule :: forall var cat m typ .
+--class Rule abs var cat typ m where
+--  rule' :: Algebra (LambdaF abs var cat) (m (Cofree (LambdaF abs var cat) typ))
+
+rule :: forall abs var cat m typ .
         Monad m
-     => IsTypeApp var cat typ
+     => AbsRule abs var cat typ m
+     => IsTypeApp abs var cat typ
      => Functor cat
      => Fresh typ m
      => Context var typ m
@@ -61,12 +66,12 @@ rule :: forall var cat m typ .
      => Recursive typ (TermF var cat)
      => Corecursive typ (TermF var cat)
      => Arrow typ
-     => Inference var cat typ m
+     => Inference abs var cat typ m
      => Shadow var
      => Ord var
      => Foldable cat
      => FreeVars var var cat
-     => Algebra (TermF var cat) (m (Cofree (TermF var cat) typ)) 
+     => Algebra (LambdaF abs var cat) (m (Cofree (LambdaF abs var cat) typ)) 
 rule expr = 
   case expr of
     Abs b a -> absRule b a  
@@ -75,27 +80,33 @@ rule expr =
     Cat c -> inference c 
 
 
-class Inference var cat typ m where
-  inference :: cat (m (Cofree (TermF var cat) typ)) -> m (Cofree (TermF var cat) typ)
+class Inference abs var cat typ m where
+  inference :: cat (m (Cofree (LambdaF abs var cat) typ)) -> m (Cofree (LambdaF abs var cat) typ)
 
-absRule :: forall m typ var cat.
-           Bind m
-        => Fresh typ m
-        => Context var typ m
-        => Rewrite typ m
-        => Arrow typ
-        => Applicative m
-        => Shadow var
-        => var
-        -> m (Cofree (TermF var cat) typ)
-        -> m (Cofree (TermF var cat) typ)
-absRule binding inferBody = do 
-  tyBind <- fresh
-  assume binding tyBind
-  assume (shadow binding) tyBind 
-  tyBody <- inferBody
-  tyBind' <- rewrite tyBind 
-  pure $ (tyBind' :->: (head tyBody)) :< (Abs binding tyBody)
+class AbsRule abs var cat typ m where
+  absRule :: abs
+          -> m (Cofree (LambdaF abs var cat) typ)  
+          -> m (Cofree (LambdaF abs var cat) typ)  
+
+instance AbsRule Void var cat typ m where
+  absRule v _ = absurd v
+else
+instance
+  ( Bind m
+  , Fresh typ m
+  , Context var typ m
+  , Rewrite typ m
+  , Arrow typ
+  , Applicative m
+  , Shadow var
+  ) => AbsRule var var cat typ m where
+  absRule binding inferBody = do 
+    tyBind <- fresh
+    assume binding tyBind
+    assume (shadow binding) tyBind 
+    tyBody <- inferBody
+    tyBind' <- rewrite tyBind 
+    pure $ (tyBind' :->: (head tyBody)) :< (Abs binding tyBody)
 
 class IsStar f abs var cat where
   isStar :: f (LambdaF abs var cat) -> Boolean
@@ -103,44 +114,49 @@ class IsStar f abs var cat where
 instance IsStar f abs var cat => IsType (f (LambdaF abs var cat)) where
   isType = isStar
 
-class IsTypeApp var cat typ where
-  isTypeApp :: Cofree (TermF var cat) typ -> Maybe typ
+class IsTypeApp abs var cat typ where
+  isTypeApp :: Cofree (LambdaF abs var cat) typ -> Maybe typ
 
 class IsType typ where
   isType :: typ -> Boolean
 
-appRule :: forall m typ var cat.
-           Bind m
-        => IsTypeApp var cat typ
-        => Functor cat
-        => Unify typ typ m
-        => Applicative m
-        => Arrow typ
-        => Fresh typ m
-        => Rewrite typ m
-        => Recursive typ (TermF var cat)
-        => Corecursive typ (TermF var cat)
-        => Ord var
-        => Foldable cat
-        => FreeVars var var cat
-        => Cofree (TermF var cat) typ
-        -> Cofree (TermF var cat) typ
-        -> m (Cofree (TermF var cat) typ)
-appRule f a = do
-  let arrTy = head f
-      argTy = head a
-  case project (closeTerm arrTy) /\ isTypeApp a of
-    -- Applying a type level lambda (forall)
-    Abs v b /\ Just argLit -> do
-      _ <- unify (var v :: typ) argLit
-      tyApp <- rewrite b
-      pure $ tyApp :< App f a
-    -- Applying a term level arrow (a -> b)
-    _ -> do
-      arrArg /\ arrRet <- unifyWithArrow arrTy
-      void $ unify arrArg argTy
-      arrRet' <- rewrite arrRet
-      pure $ arrRet' :< (App f a)
+class AppRule abs var cat typ m where
+  appRule :: Cofree (LambdaF abs var cat) typ
+          -> Cofree (LambdaF abs var cat) typ
+          -> m (Cofree (LambdaF abs var cat) typ)
+
+instance
+  ( Bind m
+  , IsTypeApp abs var cat typ
+  , Functor cat
+  , Unify typ typ m
+  , Applicative m
+  , Arrow typ
+  , Fresh typ m
+  , Rewrite typ m
+  , Recursive typ (TermF var cat)
+  , Corecursive typ (TermF var cat)
+  , Ord var
+  , Foldable cat
+  , FreeVars var var cat
+  ) => AppRule abs var cat typ m where
+  appRule f a = do
+    let arrTy = head f
+        argTy = head a
+    case project (closeTerm arrTy) /\ isTypeApp a of
+      -- Applying a type level lambda (forall)
+      Abs v b /\ Just argLit -> do
+        _ <- unify (var v :: typ) argLit
+        tyApp <- rewrite b
+        pure $ tyApp :< App f a
+      -- Applying a term level arrow (a -> b)
+      _ -> do
+        arrArg /\ arrRet <- unifyWithArrow arrTy
+        void $ unify arrArg argTy
+        arrRet' <- rewrite arrRet
+        pure $ arrRet' :< (App f a)
+
+
 
 unifyWithArrow :: forall m exp.
                   Bind m

@@ -20,6 +20,7 @@
          r = Bar
 
 
-       in case q (x j i) of
-            Baz o => o
-            Bar => 0 ) intPlus
+       in case (q (x j i)) of
+            Bar => 0
+            (Baz o) => intPlus o 1
+            ) intPlus

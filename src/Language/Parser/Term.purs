@@ -78,22 +78,23 @@ data Decl =
   | ValueDecl Var Term
   | DataDecl DataTypeDecl (List DataValueDecl)
 
-data DataTypeDecl = DataTypeDecl Var (List Var)
+data DataTypeDecl = DataTypeDecl String (List Var)
 data DataValueDecl = DataValueDecl String (List Var)
 
 dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
 dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
   where
+    -- TODO this should be TypeConstructor (or Type and Data should be merged)
     dataType :: Term
-    dataType = appMany (var tycon) (var <$> tyvars) 
+    dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars) 
     go (ds /\ Nil) = Done ds
     go (ds /\ (DataValueDecl c ts):r) =
       let constructorType :: Term
-          constructorType = absMany tyvars (arrMany (var <$> ts) dataType) 
+          constructorType = absMany ts (arrMany (var <$> ts) dataType) 
           typeDecl :: Decl
           typeDecl = TypeDecl (Ident $ TermVar c) constructorType
           valDecl :: Decl 
-          valDecl = ValueDecl (Ident $ TermVar c) (cat (Data (DataConstructor c constructorType)))
+          valDecl = ValueDecl (Ident $ TermVar c) (cat (Data (DataConstructor c (Just constructorType))))
        in Loop ((typeDecl:valDecl:ds) /\ r)
 
 instance Show Decl where
@@ -101,7 +102,7 @@ instance Show Decl where
   show (ValueDecl v t) = prettyPrint v <> " = " <> prettyPrint t
   show (DataDecl (DataTypeDecl t vs) cs) =
     let prettyCon (DataValueDecl s v) = foldl beside (text s) (pretty <$> v)
-     in prettyPrint $ text "data" <+> foldl beside (pretty t) (pretty <$> vs)
+     in prettyPrint $ text "data" <+> foldl beside (text t) (pretty <$> vs)
                                   <+> text "="
                                   <+> foldl beside (text "") (intersperse (text "|") (fromFoldable $ prettyCon <$> cs))
 
@@ -171,7 +172,7 @@ parser mod = {
            dcons <- many (indented *> (reservedOp "|") *> withPos parseDataValueDecl)
            pure (DataDecl dtc (fcon:dcons))
         parseDataTypeDecl = do
-           con <- parseTypeConstructor
+           con <- parseDataConstructor'
            tvs <- many parseTypeVar
            pure (DataTypeDecl con tvs)
         parseDataValueDecl = do
@@ -189,8 +190,8 @@ parser mod = {
         then pure $ Ident $ TermVar i
         else fail "Term variables must not start with an upper case char"
 
-    parseDataConstructor :: Monad m => IndentParserT m Var
-    parseDataConstructor = (Ident <<< TermVar) <$> parseDataConstructor'
+    parseDataConstructor :: forall abs . Monad m => IndentParserT m (Mu (LambdaF abs Var TT))
+    parseDataConstructor = (cat <<< Data <<< flip DataConstructor Nothing) <$> parseDataConstructor'
 
     parseDataConstructor' :: Monad m => IndentParserT m String
     parseDataConstructor' = do
@@ -248,13 +249,13 @@ parser mod = {
     parseValue = indented *> (buildExprParser [] (buildPostfixParser [parseApp, parseTypeAnnotation] parseValueAtom)) 
     
     parseValueAtom :: IndentParserT m Term
-    parseValueAtom = defer $ \_ -> indented *> (parseCaseExpr <|> parseAbs <|> parseNatives <|> (try (var <$> parseTermVar) <|> var <$> parseDataConstructor) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
+    parseValueAtom = defer $ \_ -> indented *> (parseCaseExpr <|> parseAbs <|> parseNatives <|> (try (var <$> parseTermVar) <|> parseDataConstructor) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
  
     parsePattern :: Monad m => IndentParserT m Pattern
-    parsePattern = (buildExprParser [] (buildPostfixParser [parseTypeAnnotation] parsePatternAtom)) 
+    parsePattern = (buildExprParser [] (buildPostfixParser [parsePatternApp, parseTypeAnnotation] parsePatternAtom)) 
  
     parsePatternAtom :: IndentParserT m Pattern
-    parsePatternAtom = defer $ \_ -> ((try (var <$> parseTermVar) <|> var <$> parseDataConstructor) <|> parseNumeric <|> (parens parsePattern))
+    parsePatternAtom = defer $ \_ -> ((try (var <$> parseTermVar) <|> parseDataConstructor) <|> parseNumeric <|> (parens parsePattern))
  
     
     parseTypeLit :: IndentParserT m Term
@@ -278,14 +279,14 @@ parser mod = {
     parseCaseExpr :: Monad m => IndentParserT m Term
     parseCaseExpr = do
       withPos' (reserved "case") do
-        exps <- many1 parseValue
+        exps <- many1 parseValueAtom
         reserved "of"
         alts <- block1 parseCaseAlternative
         pure $ cat (Case exps alts) 
 
     parseCaseAlternative :: Monad m => IndentParserT m (CaseAlternative Term)
     parseCaseAlternative = do
-       patterns <- many1Till parsePattern (reservedOp "=>")
+       patterns <- many1Till parsePatternAtom (reservedOp "=>")
        body <- parseValue
        pure $ CaseAlternative { patterns, guard: Nothing, body }
 
@@ -317,6 +318,9 @@ parser mod = {
     parseApp :: Term -> IndentParserT m Term
     parseApp v = app v <$> parseValueAtom
     
+    parsePatternApp :: Pattern -> IndentParserT m Pattern
+    parsePatternApp v = app v <$> parsePatternAtom
+ 
     parseType :: Monad m => IndentParserT m Term
     parseType = indented *> (buildPostfixParser [parseTypeArrow, parseTypeApp, parseTypeAnnotation] parseTypeAtom) 
     

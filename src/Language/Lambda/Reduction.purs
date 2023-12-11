@@ -30,7 +30,7 @@ elimReduce :: forall t f var cat m.
          => Traversable cat
          => Functor cat
          => Basis t m f var cat
-         => IsTypeApp var cat (f (LambdaF var var cat))
+         => IsTypeApp var var cat (f (LambdaF var var cat))
          => Fresh (f (LambdaF var var cat)) m
          => Ord var
          => NotInScopeError var m
@@ -44,7 +44,7 @@ elimReduce :: forall t f var cat m.
          => Unify var (f (LambdaF var var cat)) m
          => ThrowUnificationError (f (LambdaF var var cat)) m 
          => ArrowObject (cat (f (LambdaF var var cat))) 
-         => Inference var cat (f (LambdaF var var cat)) m 
+         => Inference var var cat (f (LambdaF var var cat)) m 
          => FreeVars var var cat
          => Eq1 cat
          => Proxy t
