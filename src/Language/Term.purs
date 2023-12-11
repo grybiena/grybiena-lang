@@ -25,8 +25,6 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
 import Data.Tuple (snd, uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
-import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Class.Console (log)
 import Language.Kernel.Data (Data(..))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), PatternF, absMany, app, appMany, cat, free, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
@@ -349,7 +347,7 @@ instance
   unify a b = unificationError (cat a) (cat b)
 
 instance
-  ( MonadEffect m
+  ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowUnificationError Term m
@@ -379,7 +377,7 @@ instance
  
 
 instance
-  ( MonadEffect m
+  ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowUnificationError Term m
@@ -471,7 +469,7 @@ instance
       _ -> pure $ ty :< App a b 
 
 instance
-  ( MonadEffect m
+  ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowRecursiveModuleError Mu Var TT m

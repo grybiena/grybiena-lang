@@ -1,13 +1,14 @@
 module Language.Native.Reify where
 
-import Control.Alternative (class Applicative, pure)
+import Prelude
+
 import Data.Homogeneous (class HomogeneousRowLabels)
 import Data.Homogeneous.Record (homogeneous)
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(..))
 import Data.Symbol (class IsSymbol, reflectSymbol)
 import Effect (Effect)
 import Heterogeneous.Mapping (class MapRecordWithIndex, class MappingWithIndex, hmapWithIndex)
-import Language.Kernel.Type (Type, primitiveTypeConstructors)
+import Language.Kernel.Data (Data(..))
 import Language.Lambda.Calculus (app, cat)
 import Language.Native (Native(..))
 import Language.Native.Module (NativeModule)
@@ -45,12 +46,12 @@ class Reify s where
 
 instance Reify Type where
   reify _ = cat (Star 1)
+else
+instance (Reify a, Reify b) => Reify (a b) where
+  reify _ = app (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b))
 
 instance Reify (->) where
   reify _ = cat Arrow
-
-instance (Reify a, Reify b) => Reify (a b) where
-  reify _ = app (reify (Proxy :: Proxy a)) (reify (Proxy :: Proxy b))
 
 instance Reify Effect where
   reify _ = cat (Native (nativeTerm "Effect" primitiveTypeConstructors."Effect"))
@@ -69,4 +70,24 @@ instance Reify Maybe where
 
 instance Reify Array where
   reify _ = cat (Native (nativeTerm "Array" primitiveTypeConstructors."Array"))
+
+type Type = Data Term
+
+primitiveTypeConstructors :: Record 
+  ( "Int" :: Type
+  , "Number" :: Type
+  , "Boolean" :: Type
+  , "Effect" :: Type -> Type
+  , "Maybe" :: Type -> Type
+  , "Array" :: Type -> Type
+  )
+primitiveTypeConstructors = 
+  { "Int": DataConstructor "Int" (Just $ reify (Proxy :: Proxy Type))
+  , "Number": DataConstructor "Number" (Just $ reify (Proxy :: Proxy Type))
+  , "Boolean": DataConstructor "Boolean" (Just $ reify (Proxy :: Proxy Type))
+  , "Effect": DataApp (DataConstructor "Effect" (Just $ reify (Proxy :: Proxy (Type -> Type))))
+  , "Maybe": DataApp (DataConstructor "Maybe" (Just $ reify (Proxy :: Proxy (Type -> Type)))) 
+  , "Array": DataApp (DataConstructor "Array" (Just $ reify (Proxy :: Proxy (Type -> Type))))
+ 
+  }
 
