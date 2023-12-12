@@ -7,14 +7,15 @@ import Control.Monad.Cont (lift)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (ExceptT)
 import Control.Monad.State (class MonadState)
-import Data.Array (replicate)
+import Data.Array (intersperse, replicate)
+import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Eq (class Eq1)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable, foldMap, foldl, foldr, sequence_)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.List (List(..))
+import Data.List (List(..), reverse, (:))
 import Data.List as List
 import Data.List.NonEmpty (NonEmptyList, foldM, zipWith)
 import Data.Map as Map
@@ -23,13 +24,11 @@ import Data.Ord.Generic (genericCompare)
 import Data.Show.Generic (genericShow)
 import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
-import Data.Tuple (Tuple(..), fst, snd, uncurry)
+import Data.Tuple (Tuple(..), fst, snd)
 import Data.Tuple.Nested (type (/\), (/\))
-import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Class.Console (log)
 import Effect.Exception (error)
 import Language.Kernel.Data (Data(..))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), PatternF, abs, absMany, app, appMany, cat, free, freeIn, prettyVar, replace, replaceFree, shadow, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), PatternF, app, cat, freeIn, freeTyped, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, arrMany, arrow, closeTerm, flat, infer, (:->:))
 import Language.Lambda.Module (Module(..), sequenceBindings)
@@ -522,8 +521,8 @@ type TypedTerm = (Cofree (LambdaF Var Var TT) Term)
 reduceCase :: NonEmptyList (Var /\ Term) -> Term -> NonEmptyList (CaseAlternative TypedTerm) -> TypedTerm
 reduceCase argVars caseTy branches = appArgs (foldr reduceBranch fallThrough branches) 
   where
---    absArgs b = foldl absArg b argVars 
---    absArg b (v /\ t) = (t :->: (head b)) :< Abs v b
+    absArgs args b = foldl absArg b args
+    absArg b (v /\ t) = (t :->: (head b)) :< Abs v b
     appArgs :: TypedTerm -> TypedTerm
     appArgs b = foldl appArg b argVars
     appArg b (v /\ t) = caseTy :< App b (t :< Var v)
@@ -534,46 +533,70 @@ reduceCase argVars caseTy branches = appArgs (foldr reduceBranch fallThrough bra
                           , nativePretty: "Pattern match failed."
                           })
     reduceBranch :: CaseAlternative TypedTerm -> TypedTerm -> TypedTerm
-    reduceBranch (CaseAlternative { patterns, body }) fall = fall
-              -- TODO we want the pattern vars to be typed
-              -- and we want `free` to give us these typed vars
-              -- in the same order that extract will match them at run time
+    reduceBranch (CaseAlternative { patterns, body }) fall =
+      let boundVars = foldl append Nil $ freeTyped <$> patterns 
+          branch = absArgs boundVars body 
+          fallTy = arrMany (snd <$> argVars) caseTy
+          branchTy = head branch
+          matchTy = branchTy :->: (fallTy :->: fallTy) 
 
-              -- branch ~ absMany [typed binders...] body 
+          -- ([a,b,c,...] -> d) -> (\a b c ... -> d)
+          liftArgList :: (List (Data Term) -> Match) -> Match
+          liftArgList f =
+            case List.length $ List.fromFoldable argVars of
+              0 -> f Nil
+              1 -> Match (unsafeCoerce $ \x -> f (List.singleton x))
+              2 -> Match (unsafeCoerce $ \x y -> f (List.fromFoldable [x, y])) 
+              3 -> Match (unsafeCoerce $ \x y z -> f (List.fromFoldable [x, y, z])) 
+              _ -> unsafeCoerce "needs templating" 
 
-             -- native like this
-             -- \branch fall [args...] (maybe (fall [args...]) (\[binds...] -> branch [binds...]) (extract [args...])) 
-             -- app (app native branch) fall
+          liftAppList :: Match -> List Match -> Match
+          liftAppList (Match f) l = foldl liftApp f l 
+            where
+              liftApp :: Match -> Match -> Match
+              liftApp (Match g) (Match a) = Match (g a) 
+
+
+          extractPattern :: List (Data Term) -> Maybe (List Match)
+          extractPattern = bindPatterns (flat <$> List.fromFoldable patterns)
+
+          matchCase :: (List (Data Term) -> Match) -> (List Match -> Match) -> List (Data Term) -> Match
+          matchCase f b = applyMatch f b extractPattern 
+
+
+
+          match = matchTy :< Cat (Native (Purescript {
+                                 nativeType: matchTy
+                                 , nativePretty: "match (" <> Array.fold (intersperse "," (Array.fromFoldable (prettyPrint <$> (flat <$> patterns :: NonEmptyList Term)))) <> ")"
+                                , nativeTerm:  --unsafeCoerce $ const $ const $ const (error "Pattern match failed.")
+                                    unsafeCoerce $ \branching falling ->
+                                      let Match q =
+                                            liftArgList $
+                                              matchCase (liftAppList (Match (unsafeCoerce falling))
+                                                                 <<< map (Match <<< unsafeCoerce)
+                                                        )
+                                                        (liftAppList (Match (unsafeCoerce branching)))
+                                          in q
+
+                                }))
+       in fallTy :< App ((fallTy :->: fallTy) :< App match branch) fall 
+
+applyMatch :: forall a b c. (List a -> b) -> (List c -> b) -> (List a -> Maybe (List c)) -> List a -> b
+applyMatch fall branch extract args = maybe (fall args) branch (extract args)
 
 
 
 newtype Match = Match (forall a. a)
 
-bindPattern' :: Pattern -> Data Term -> Maybe (List Match) 
-bindPattern' (In (App a b)) (DataApp a' b') = append <$> bindPattern' a a' <*> bindPattern' b b'
-bindPattern' t@(In (App _ _)) (DataNative n) = bindPattern' t n 
-bindPattern' (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) | c == c' = Just Nil
-bindPattern' t@(In (Cat (Data (DataConstructor _ _)))) (DataNative n) = bindPattern' t n 
-bindPattern' (In (Var v)) (DataNative n) = Just $ pure $ Match n 
-bindPattern' _ _ = Nothing
+bindPattern :: Term -> Data Term -> Maybe (List Match) 
+bindPattern (In (App a b)) (DataApp a' b') = append <$> bindPattern a a' <*> bindPattern b b'
+bindPattern t@(In (App _ _)) (DataNative n) = bindPattern t n 
+bindPattern (In (Cat (Data c@(DataConstructor _ _)))) c'@(DataConstructor _ _) | c == c' = Just Nil
+bindPattern t@(In (Cat (Data (DataConstructor _ _)))) (DataNative n) = bindPattern t n 
+bindPattern (In (Var _)) (DataNative n) = Just $ pure $ Match n 
+bindPattern _ _ = Nothing
 
-newtype Branch = Branch (forall a. a)
-
-
-
---reduceCaseAlternative' :: (CaseAlternative Term) -> (List (Data Term) -> Maybe (List Match)) /\ Term
---reduceCaseAlternative' (CaseAlternative { patterns, body }) = 
---  let bound :: List Var
---      bound = join $ map free (List.fromFoldable patterns)
---      branch :: Term
---      branch = absMany bound body
---      foo args = join <$> (sequence $ List.zipWith bindPattern' (List.fromFoldable patterns) args)
---   in foo /\ branch 
-
-
-
-bing :: forall a b. a -> (List a -> b) -> (List a -> b)
-bing a f = f <<< List.(:) a
-
+bindPatterns :: List Term -> List (Data Term) -> Maybe (List Match)
+bindPatterns pats dats = map join $ sequence $ List.zipWith bindPattern pats dats
 
 

@@ -10,7 +10,7 @@ import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRec, tailRecM)
 import Control.Monad.State (class MonadState)
 import Data.Array (fromFoldable, head, intersperse, replicate)
 import Data.CodePoint.Unicode (isUpper)
-import Data.Foldable (foldl)
+import Data.Foldable (foldl, foldr)
 import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
 import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
@@ -94,10 +94,15 @@ dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
           typeDecl :: Decl
           typeDecl = TypeDecl (Ident $ TermVar c) constructorType
           liftConstructor :: Match -> Match
-          liftConstructor x = foldl liftDataApp x ts
-            where
-              liftDataApp (Match m) _ =
-                Match (unsafeCoerce (\g -> DataApp (unsafeCoerce m) (DataNative (unsafeCoerce g))))
+          liftConstructor x = 
+            case length ts of
+              0 -> x
+              1 -> let Match m = x
+                    in Match (unsafeCoerce (\g -> DataApp (unsafeCoerce m) (DataNative (unsafeCoerce g))))
+              2 -> let Match m = x
+                    in Match (unsafeCoerce (\g h -> DataApp (DataApp (unsafeCoerce m) (DataNative (unsafeCoerce g))) (DataNative (unsafeCoerce h))))
+              _ -> unsafeCoerce "needs templated aaaaaaa"
+ 
           liftedConstructor :: Term
           liftedConstructor = cat $ Native $ Purescript {
                nativeType: constructorType

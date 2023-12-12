@@ -2,18 +2,21 @@ module Language.Lambda.Calculus where
 
 import Prelude
 
+import Control.Comonad.Cofree (Cofree, head, tail)
 import Control.Monad.State (State, evalState, get, put)
 import Data.Eq (class Eq1, eq1)
 import Data.Foldable (class Foldable, elem, foldMap, foldl, foldr)
 import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
-import Data.List (List(..))
+import Data.List (List(..), filter)
 import Data.List as List
 import Data.Maybe (Maybe(..), maybe)
 import Data.Set (Set)
 import Data.Set as Set
 import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
+import Data.Tuple (fst)
+import Data.Tuple.Nested (type (/\), (/\))
 import Matryoshka.Algebra (Algebra, AlgebraM)
 import Matryoshka.Class.Corecursive (class Corecursive, embed)
 import Matryoshka.Class.Recursive (class Recursive, project)
@@ -100,6 +103,20 @@ free :: forall exp abs var cat .
      => exp -> List var
 free = cata freeVars 
 
+freeTyped :: forall typ var cat .
+             Ord var
+          => Foldable cat
+          => Functor cat
+          => Cofree (LambdaF var var cat) typ -> List (var /\ typ)
+freeTyped t =
+  case head t /\ tail t of
+    (ty /\ Var v) -> List.singleton (v /\ ty)
+    (_ /\ App a b) -> freeTyped a <> freeTyped b
+    (_ /\ Abs x b) -> filter (not <<< eq x <<< fst) $ freeTyped b
+    (_ /\ Cat c) -> foldl append Nil (freeTyped <$> c)
+
+
+
 class FreeVars abs var cat where
   freeVars :: Algebra (LambdaF abs var cat) (List var) 
 
@@ -121,6 +138,8 @@ instance
   freeVars (Abs v a) = List.difference a (free v)
   freeVars (Var v) = List.singleton v
   freeVars (App a b) = List.nub (a <> b) 
+-- TODO this is wrong since we don't account for bound patterns capturing
+-- variables...
   freeVars (Cat c) = foldl append Nil c
 else
 instance

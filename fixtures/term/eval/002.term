@@ -1,0 +1,10 @@
+let
+  data Foo a =
+      Bar
+    | Baz a
+  q = Baz
+
+in case (q (intPlus 1 1)) of
+     Bar => 0
+     (Baz o) => o 
+
