@@ -194,6 +194,13 @@ parser mod = {
            pure $ DataValueDecl dcon tvs
 
 
+    parseBinder :: Monad m => IndentParserT m Term
+    parseBinder = do
+      i <- identifier 
+      if Just false == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+        then pure $ cat $ Binder i
+        else fail "Binders must not start with an upper case char"
+
 
 
     parseTermVar :: Monad m => IndentParserT m Var
@@ -264,11 +271,11 @@ parser mod = {
     parseValueAtom :: IndentParserT m Term
     parseValueAtom = defer $ \_ -> indented *> (parseCaseExpr <|> parseAbs <|> parseNatives <|> (try (var <$> parseTermVar) <|> (var <<< Ident <<< TermVar <$> parseDataConstructor')) <|> parseNumeric <|> parseTypeLit <|> parseLet <|> parseIfElse <|> (parens parseValue))
  
-    parsePattern :: Monad m => IndentParserT m Pattern
+    parsePattern :: Monad m => IndentParserT m Term 
     parsePattern = (buildExprParser [] (buildPostfixParser [parsePatternApp, parseTypeAnnotation] parsePatternAtom)) 
  
-    parsePatternAtom :: IndentParserT m Pattern
-    parsePatternAtom = defer $ \_ -> ((try (var <$> parseTermVar) <|> parseDataConstructor) <|> parseNumeric <|> (parens parsePattern))
+    parsePatternAtom :: IndentParserT m Term 
+    parsePatternAtom = defer $ \_ -> ((try parseBinder <|> parseDataConstructor) <|> parseNumeric <|> (parens parsePattern))
  
     
     parseTypeLit :: IndentParserT m Term
@@ -331,7 +338,7 @@ parser mod = {
     parseApp :: Term -> IndentParserT m Term
     parseApp v = app v <$> parseValueAtom
     
-    parsePatternApp :: Pattern -> IndentParserT m Pattern
+    parsePatternApp :: Term -> IndentParserT m Term
     parsePatternApp v = app v <$> parsePatternAtom
  
     parseType :: Monad m => IndentParserT m Term

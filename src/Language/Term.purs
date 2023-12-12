@@ -47,9 +47,11 @@ type Term = Lambda Var Var TT
 
 type Pattern = Mu (PatternF Var TT)
 
+type TypedPattern = Cofree (PatternF Var TT) Term
+
 newtype CaseAlternative a
   = CaseAlternative {
-      patterns :: NonEmptyList Pattern
+      patterns :: NonEmptyList a 
     , guard :: Maybe a 
     , body :: a
     }
@@ -57,17 +59,18 @@ newtype CaseAlternative a
 derive newtype instance Eq a => Eq (CaseAlternative a)
 
 instance Functor CaseAlternative where
-  map f (CaseAlternative a) = CaseAlternative { patterns: a.patterns, guard: map f a.guard, body: f a.body }
+  map f (CaseAlternative a) = CaseAlternative { patterns: map f a.patterns, guard: map f a.guard, body: f a.body }
 
 instance Foldable CaseAlternative where
-  foldr f b (CaseAlternative a) = f a.body (foldr f b a.guard)
-  foldl f b (CaseAlternative a) = f (foldl f b a.guard) a.body
-  foldMap f (CaseAlternative a) = foldMap f a.guard <> f a.body
+  foldr f b (CaseAlternative a) = f a.body (foldr f (foldr f b a.patterns) a.guard)
+  foldl f b (CaseAlternative a) = f (foldl f (foldl f b a.patterns) a.guard) a.body
+  foldMap f (CaseAlternative a) = foldMap f a.patterns <> foldMap f a.guard <> f a.body
  
 instance Traversable CaseAlternative where
   traverse f (CaseAlternative a) =
-    (\guard body -> CaseAlternative { patterns: a.patterns, guard, body })
-      <$> traverse f a.guard
+    (\patterns guard body -> CaseAlternative { patterns, guard, body })
+      <$> traverse f a.patterns
+      <*> traverse f a.guard
       <*> f a.body
   sequence = traverse identity
 
@@ -81,7 +84,7 @@ data TT a =
   | TypeAnnotation a Term
   | TypeLit Term
   | Native (Native Term)
-  | Pattern String
+  | Binder String
   | Data (Data Term)
   | Case (NonEmptyList a) (NonEmptyList (CaseAlternative a)) 
 
@@ -126,7 +129,7 @@ instance Functor TT where
   map f (TypeAnnotation a t) = TypeAnnotation (f a) t
   map _ (TypeLit t) = TypeLit t
   map _ (Native n) = Native n 
-  map _ (Pattern p) = Pattern p
+  map _ (Binder p) = Binder p
   map _ (Data d) = Data d
   map f (Case a e) = Case (map f a) (map f <$> e)
 
@@ -137,7 +140,7 @@ instance Traversable TT where
   traverse f (TypeAnnotation a t) = flip TypeAnnotation t <$> f a
   traverse _ (TypeLit t) = pure $ TypeLit t
   traverse _ (Native n) = pure $ Native n 
-  traverse _ (Pattern p) = pure $ Pattern p
+  traverse _ (Binder p) = pure $ Binder p
   traverse _ (Data d) = pure $ Data d
   traverse f (Case o b) = Case <$> traverse f o <*> traverse (traverse f) b
   sequence = traverse identity
@@ -160,7 +163,7 @@ instance Foldable TT where
   foldr f b (TypeAnnotation a _) = f a b
   foldr _ b (TypeLit _) = b
   foldr _ b (Native _) = b
-  foldr _ b (Pattern _) = b
+  foldr _ b (Binder _) = b
   foldr _ b (Data _) = b
   foldr f b (Case a e) = foldl (foldr f) (foldr f b a) e
   foldl _ b (Star _) = b
@@ -169,7 +172,7 @@ instance Foldable TT where
   foldl f b (TypeAnnotation a _) = f b a
   foldl _ b (TypeLit _) = b
   foldl _ b (Native _) = b
-  foldl _ b (Pattern _) = b
+  foldl _ b (Binder _) = b
   foldl _ b (Data _) = b
   foldl f b (Case a e) = foldl (foldl f) (foldl f b a) e
   foldMap _ (Star _) = mempty
@@ -178,7 +181,7 @@ instance Foldable TT where
   foldMap f (TypeAnnotation a _) = f a
   foldMap _ (TypeLit _) = mempty
   foldMap _ (Native _) = mempty
-  foldMap _ (Pattern _) = mempty
+  foldMap _ (Binder _) = mempty
   foldMap _ (Data _) = mempty
   foldMap f (Case a e) = foldMap f a <> foldMap (foldMap f) e
 
@@ -243,7 +246,7 @@ isTypeVar (Skolemized i _ _) = isTypeIdent i
 instance PrettyLambda Void Var TT where
   prettyAbs v _ = absurd v
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
-  prettyCat (Pattern p) = text p
+  prettyCat (Binder p) = text p
   prettyCat (Data d) = pretty d
   prettyCat _  = text "TODO pattern category"
 
@@ -264,7 +267,7 @@ instance PrettyLambda Var Var TT where
   prettyCat (TypeAnnotation v t) = text "(" <> pretty v <+> text "::" <+> pretty t <> text ")"
   prettyCat (TypeLit a) = text "@" <> pretty a
   prettyCat (Native (Purescript { nativePretty })) = text nativePretty
-  prettyCat (Pattern p) = text p
+  prettyCat (Binder p) = text p
   prettyCat (Data d) = pretty d
   prettyCat (Case a e) = text "case" <+> foldl beside mempty (pretty <$> a) <+> text "of"
                       </> stack (prettyAlt <$> List.fromFoldable e)
@@ -366,7 +369,10 @@ instance
     pure (vt' :< tail vt)
   inference (TypeLit t) = pure $ t :< (Cat (TypeLit t))
   inference (Native (Purescript n)) = pure $ n.nativeType :< Cat (Native (Purescript n))
-  inference (Pattern p) = require (Ident $ TermVar p) >>= \t -> pure (t :< Cat (Pattern p))
+  inference (Binder p) = fresh >>= \t -> let v = Ident $ TermVar p
+                                          in do
+                                             assume v t
+                                             pure (t :< Var v)
   inference (Data (DataConstructor c (Just t))) = pure (t :< Cat (Data (DataConstructor c (Just t)))) 
   inference (Data (DataConstructor c Nothing)) = do
      t <- require (Ident $ TermVar c)
@@ -411,12 +417,14 @@ instance
   inference (Case args branches) = do
     -- TODO check all branches have the same number of patterns as the args in the case
     -- TODO check all the guards are of type Boolean
+    -- TODO check matches are exhaustive
     typedArgs <- sequence args
     let typeBranch (CaseAlternative a) = do
-           traverse_ (\x -> fresh >>= assume x) (join (List.fromFoldable $ free <$> a.patterns))
+           binds <- sequence a.patterns
            guard <- sequence a.guard
            body <- a.body
-           pure $ CaseAlternative { patterns: a.patterns, guard, body } 
+           patterns <- traverse (traverse rewrite) binds 
+           pure $ CaseAlternative { patterns: patterns, guard, body } 
     typedBranches <- traverse typeBranch branches
     let argTys = head <$> typedArgs 
         getBody (CaseAlternative { body }) = body
@@ -428,12 +436,14 @@ instance
           rewrite a
     argTys' <- traverse rewrite argTys
     caseTy <- foldM unifyAll t bodies
-    let unifyBinder arg = join <<< map (unify arg <<< head)
-        unifyBinders (CaseAlternative { patterns }) = do
-           sequence_ (zipWith unifyBinder argTys' (infer <$> patterns))
-    traverse_ unifyBinders branches
+    let unifyBinders (CaseAlternative { patterns }) = do
+           sequence_ (zipWith unify argTys' (head <$> patterns :: NonEmptyList Term))
+    traverse_ unifyBinders typedBranches 
     pure $ caseTy :< (Cat (Case typedArgs typedBranches))
-  inference (Pattern p) = require (Ident $ TermVar p) >>= \t -> pure (t :< Cat (Pattern p))
+  inference (Binder p) = fresh >>= \t -> let v = Ident $ TermVar p
+                                          in do
+                                             assume v t
+                                             pure (t :< Var v)
   inference (Data (DataConstructor c (Just t))) = pure (t :< Cat (Data (DataConstructor c (Just t)))) 
   inference (Data (DataConstructor c Nothing)) = do
      t <- require (Ident $ TermVar c)
@@ -510,7 +520,7 @@ instance
 type TypedTerm = (Cofree (LambdaF Var Var TT) Term)
 
 reduceCase :: NonEmptyList (Var /\ Term) -> Term -> NonEmptyList (CaseAlternative TypedTerm) -> TypedTerm
-reduceCase argVars caseTy branches = appArgs (foldr (reduceBranch argVars) fallThrough branches) 
+reduceCase argVars caseTy branches = appArgs (foldr reduceBranch fallThrough branches) 
   where
 --    absArgs b = foldl absArg b argVars 
 --    absArg b (v /\ t) = (t :->: (head b)) :< Abs v b
@@ -523,8 +533,18 @@ reduceCase argVars caseTy branches = appArgs (foldr (reduceBranch argVars) fallT
                           , nativeTerm: unsafeCoerce $ const (error "Pattern match failed.")
                           , nativePretty: "Pattern match failed."
                           })
-    reduceBranch :: NonEmptyList (Var /\ Term) -> CaseAlternative TypedTerm -> TypedTerm -> TypedTerm
-    reduceBranch _ _ _ = fallThrough 
+    reduceBranch :: CaseAlternative TypedTerm -> TypedTerm -> TypedTerm
+    reduceBranch (CaseAlternative { patterns, body }) fall = fall
+              -- TODO we want the pattern vars to be typed
+              -- and we want `free` to give us these typed vars
+              -- in the same order that extract will match them at run time
+
+              -- branch ~ absMany [typed binders...] body 
+
+             -- native like this
+             -- \branch fall [args...] (maybe (fall [args...]) (\[binds...] -> branch [binds...]) (extract [args...])) 
+             -- app (app native branch) fall
+
 
 
 newtype Match = Match (forall a. a)
@@ -541,14 +561,14 @@ newtype Branch = Branch (forall a. a)
 
 
 
-reduceCaseAlternative' :: (CaseAlternative Term) -> (List (Data Term) -> Maybe (List Match)) /\ Term
-reduceCaseAlternative' (CaseAlternative { patterns, body }) = 
-  let bound :: List Var
-      bound = join $ map free (List.fromFoldable patterns)
-      branch :: Term
-      branch = absMany bound body
-      foo args = join <$> (sequence $ List.zipWith bindPattern' (List.fromFoldable patterns) args)
-   in foo /\ branch 
+--reduceCaseAlternative' :: (CaseAlternative Term) -> (List (Data Term) -> Maybe (List Match)) /\ Term
+--reduceCaseAlternative' (CaseAlternative { patterns, body }) = 
+--  let bound :: List Var
+--      bound = join $ map free (List.fromFoldable patterns)
+--      branch :: Term
+--      branch = absMany bound body
+--      foo args = join <$> (sequence $ List.zipWith bindPattern' (List.fromFoldable patterns) args)
+--   in foo /\ branch 
 
 
 
