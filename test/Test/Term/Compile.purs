@@ -119,6 +119,6 @@ compiles s e = do
                 ok <- liftAff $ structurallyEquivalent nativeType typ
                 if ok then pure $ Right unit else pure $ Left $ TypeError $ prettyPrint nativeType <> " =?= " <> prettyPrint typ 
               _ -> pure $ Left $ ReductionError $ 
---                (prettyPrint (flat out :: Term) <> " :: " <> prettyPrint (head out))
-                (show (flat out :: Term)) 
+                (prettyPrint (flat out :: Term) <> " :: " <> prettyPrint (head out))
+--                (show (flat out :: Term)) 
  

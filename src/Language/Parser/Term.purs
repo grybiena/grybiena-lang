@@ -38,7 +38,7 @@ import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos, withPos')
-import Language.Term (CaseAlternative(..), Ident(..), Match(..), Pattern, Scope(..), TT(..), Term, Var(..))
+import Language.Term (CaseAlternative(..), Ident(..), Match(..), Scope(..), TT(..), Term, Var(..))
 import Parsing (fail, runParserT)
 import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -82,6 +82,21 @@ data Decl =
 data DataTypeDecl = DataTypeDecl String (List Var)
 data DataValueDecl = DataValueDecl String (List Var) -- (List Term)
 
+--dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
+--dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
+--  where
+--    dataType :: Term
+--    dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars) 
+--    go (ds /\ Nil) = Done ds
+--    go (ds /\ (DataValueDecl c ts):r) =
+--      let constructorType :: Term
+--          constructorType = absMany tyvars (arrMany (var <$> ts) dataType) 
+--          typeDecl :: Decl
+--          typeDecl = TypeDecl (Ident $ TermVar c) constructorType
+--          valDecl :: Decl 
+--          valDecl = ValueDecl (Ident $ TermVar c) (cat (Data (DataConstructor c (Just constructorType))))
+--       in Loop ((typeDecl:valDecl:ds) /\ r)
+
 dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
 dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
   where
@@ -114,6 +129,7 @@ dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
           valDecl :: Decl 
           valDecl = ValueDecl (Ident $ TermVar c) liftedConstructor
        in Loop ((typeDecl:valDecl:ds) /\ r)
+
 
 instance Show Decl where
   show (TypeDecl v t) = prettyPrint v <> " :: " <> prettyPrint t
@@ -218,6 +234,10 @@ parser mod = {
     parseDataConstructor :: forall abs . Monad m => IndentParserT m (Mu (LambdaF abs Var TT))
     parseDataConstructor = (cat <<< Data <<< flip DataConstructor Nothing) <$> parseDataConstructor'
 
+    parsePatternConstructor :: forall abs . Monad m => IndentParserT m (Mu (LambdaF abs Var TT))
+    parsePatternConstructor = (cat <<< Pattern) <$> parseDataConstructor'
+
+
     parseDataConstructor' :: Monad m => IndentParserT m String
     parseDataConstructor' = do
       i <- identifier 
@@ -280,7 +300,7 @@ parser mod = {
     parsePattern = (buildExprParser [] (buildPostfixParser [parsePatternApp, parseTypeAnnotation] parsePatternAtom)) 
  
     parsePatternAtom :: IndentParserT m Term 
-    parsePatternAtom = defer $ \_ -> ((try parseBinder <|> parseDataConstructor) <|> parseNumeric <|> (parens parsePattern))
+    parsePatternAtom = defer $ \_ -> ((try parseBinder <|> parsePatternConstructor) <|> parseNumeric <|> (parens parsePattern))
  
     
     parseTypeLit :: IndentParserT m Term
