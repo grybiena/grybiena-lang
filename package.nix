@@ -9,6 +9,8 @@
         ordered-collections
         parsing
         prettier-printer
+
+        debug
       ];
     src = "src";
    test-dependencies =

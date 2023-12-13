@@ -91,3 +91,20 @@ sequenceBindings lr =
                   _ -> Left $ Module s
        in traverse failOnSCC scc
 
+sequenceBindings' :: forall f abs var cat.
+          Ord var
+       => Foldable cat
+       => Recursive (f (LambdaF abs var cat)) (LambdaF abs var cat)
+       => Eq (f (LambdaF abs var cat))
+       => FreeVars abs var cat
+       => Module var (f (LambdaF abs var cat))
+       -> Either (Module var (f (LambdaF abs var cat))) (Bindings var (f (LambdaF abs var cat)))
+sequenceBindings' lr =
+      let SCC (scc :: List (Module var (f (LambdaF abs var cat)))) = projection lr
+          failOnSCC :: Module var (f (LambdaF abs var cat))
+                    -> Either (Module var (f (LambdaF abs var cat))) (Binding var (f (LambdaF abs var cat))) 
+          failOnSCC (Module s) = case Map.toUnfoldable s of
+                  [v /\ t] -> if v `freeIn` t then Left (Module s) else Right (v /\ t)
+                  _ -> Left $ Module s
+       in traverse failOnSCC scc
+

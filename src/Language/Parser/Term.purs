@@ -4,7 +4,7 @@ module Language.Parser.Term where
 import Prelude
 
 import Control.Alt ((<|>))
-import Control.Comonad.Cofree ((:<))
+import Control.Comonad.Cofree (head, (:<))
 import Control.Lazy (defer)
 import Control.Monad.Cont (lift)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
@@ -24,16 +24,17 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..), maybe)
 import Data.String (codePointFromChar)
 import Data.String.CodeUnits (fromCharArray, toCharArray)
-import Data.Traversable (sequence)
+import Data.Traversable (sequence, traverse)
 import Data.Tuple (Tuple(..), fst, uncurry)
 import Data.Tuple.Nested ((/\))
+import Debug (traceM)
 import Effect (Effect)
 import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
 import Language.Lambda.Calculus (LambdaF(..), absMany, app, appMany, cat, var)
 import Language.Lambda.Inference (appRule, arrMany, closeTerm, flat, infer, (:->:))
 import Language.Lambda.Module (Module(..))
-import Language.Lambda.Unification (class Fresh, class InfiniteTypeError, class NotInScopeError, TypingContext, fresh)
+import Language.Lambda.Unification (class Fresh, class InfiniteTypeError, class NotInScopeError, TypingContext, fresh, renameFresh, rewrite)
 import Language.Lambda.Unification.Error (class ThrowUnificationError)
 import Language.Native (Native(..), native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
@@ -42,7 +43,7 @@ import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos, withPos')
-import Language.Term (CaseAlternative(..), Ident(..), Scope(..), TT(..), Term, TypedTerm, Var(..))
+import Language.Term (CaseAlternative(..), Ident(..), Scope(..), TT(..), Term, TypedTerm, Var(..), freshTermVar)
 import Parsing (fail, runParserT)
 import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -105,35 +106,48 @@ dataConstructors (DataTypeDecl tycon tyvars) = tailRecM go <<< Tuple Nil
     go (ds /\ (DataValueDecl c ts):r) =
       let constructorType :: Term
           constructorType = closeTerm (arrMany ts dataType) 
-          typeDecl :: Decl
-          typeDecl = TypeDecl (Ident $ TermVar c) constructorType
           dataApp :: Var -> TypedTerm -> m TypedTerm
           dataApp v t = do
+             traceM $ prettyPrint (head t)
              a <- fresh
              b <- fresh
              o <- fresh
-             let dapp :: Term
-                 dapp = cat (Native (Purescript {
-                              nativeType: (a :->: b) :->: a :->: b 
+             let foo = (a :->: b) :->: a :->: b 
+                 dapp :: Term -> Term
+                 dapp z = cat (Native (Purescript {
+                              nativeType: z 
                             , nativeTerm: unsafeCoerce $ \f g -> DataApp f (DataNative (unsafeCoerce g))
                             , nativePretty: "DataApp"
                             }))
-             g <- infer dapp
-             h <- appRule g t
-             appRule h (o :< Var v)
-          dataCon :: TypedTerm
-          dataCon = constructorType :< Cat (Native (Purescript {
-                              nativeType: constructorType
+             g <- infer (dapp foo)
+             _ <- appRule g t
+             foo' <- rewrite foo
+             g' <- infer (dapp foo')
+             h' <- appRule g' t
+             traverse rewrite =<< appRule h' (o :< Var v)
+          dataCon :: m TypedTerm
+          dataCon = do
+             ct <- closeTerm <$> renameFresh constructorType
+             pure $ ct :< Cat (Native (Purescript {
+                              nativeType: ct
                             , nativeTerm: unsafeCoerce $ DataConstructor c (Just constructorType)
                             , nativePretty: c 
                             }))
           dataVars :: m (Array Var)
-          dataVars = sequence (replicate (length ts) fresh) 
+          dataVars = sequence (replicate (length ts) freshTermVar) 
        in do
           vs <- dataVars
-          floop <- foldl (\b v -> b >>= dataApp v) (pure dataCon) vs
+          floop <- foldl (\b v -> b >>= dataApp v) (dataCon) vs
+          traceM $ (prettyPrint (absMany vs (flat floop) :: Term))
+          traceM (prettyPrint $ head floop)
+          let s = (absMany vs (flat floop))
+          s' <- infer s
+          traceM (prettyPrint $ head s')
           let valDecl :: Decl 
-              valDecl = ValueDecl (Ident $ TermVar c) (absMany vs (flat floop)) 
+              valDecl = ValueDecl (Ident $ TermVar c) s 
+              typeDecl :: Decl
+              typeDecl = TypeDecl (Ident $ TermVar c) (head s')
+
           pure $ Loop ((typeDecl:valDecl:ds) /\ r)
 
 
@@ -223,7 +237,7 @@ parser mod = {
            pure (DataTypeDecl con tvs)
         parseDataValueDecl = do
            dcon <- parseDataConstructor'
-           tvs <- many (indented *> parseTypeAtom)
+           tvs <- many (indented *> ((try (var <$> parseTypeVar)) <|> (try (var <$> parseTypeConstructor)) <|> parseTypeAtom))
            pure $ DataValueDecl dcon tvs
 
 

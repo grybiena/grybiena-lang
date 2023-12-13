@@ -557,6 +557,10 @@ instance
 
 type TypedTerm = (Cofree (LambdaF Var Var TT) Term)
 
+freshTermVar = do
+  (i :: Int) <- fresh
+  pure $ Ident $ TermVar $ "v" <> show i
+
 reduceCase :: Term -> NonEmptyList (CaseAlternative TypedTerm) -> TypedTerm
 reduceCase caseTy branches = foldr reduceBranch fallThrough branches
   where
@@ -577,10 +581,10 @@ reduceCase caseTy branches = foldr reduceBranch fallThrough branches
 
 
           liftAppList :: Match -> List Match -> Match
-          liftAppList (Match f) l = foldl liftApp f l 
+          liftAppList (Match f) l = foldr liftApp f l 
             where
               liftApp :: Match -> Match -> Match
-              liftApp (Match g) (Match a) = Match (g a) 
+              liftApp (Match a) (Match g) = Match (g a) 
 
 
           extractPattern :: NonEmptyList (Data Term) -> Maybe (List Match)

@@ -1,0 +1,14 @@
+let
+  data Foo a =
+      Bar Number
+    | Baz a Int
+
+  data Doo a b =
+      Da a b
+    | Do Int b
+
+
+in case (Baz (2.0 :: Number) (11 :: Int)) of
+     (Bar x) => 7
+     (Baz q o) => o 
+

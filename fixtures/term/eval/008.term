@@ -1,0 +1,12 @@
+let
+  data Foo a b =
+      Bar Number
+    | Baz a b Int
+
+  data Doo a b =
+      Da a b
+    | Do Int b
+
+in case (Baz 3.0 true 5) of
+     (Bar x) => 1
+     (Baz g f o) => o 

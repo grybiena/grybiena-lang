@@ -1,0 +1,36 @@
+let
+  data Foo a =
+      Bar Number
+    | Baz a Int
+
+  data Doo a b =
+      Da a b
+    | Do Int b
+
+  bar :: forall a. Number -> Foo a
+  bar = Bar
+
+  baz :: forall a. a -> Int -> Foo a
+  baz = Baz
+
+  da :: forall a b. a -> b -> Doo a b
+  da = Da
+
+  do :: forall a b. Int -> b -> Doo a b
+  do = Do
+
+  d :: Doo Int Int
+  d = da 1 2
+
+  f :: forall a b. Doo a b -> Int -> Foo (Doo a b)
+  f = baz
+
+--  flip :: forall a b. Doo a b -> Doo b a
+--  flip = \x -> case x of
+--                 (Da a b) => Da b a
+
+  h :: forall a b. Doo a b -> Doo a b
+  h = \x -> x
+
+in 1 
+
