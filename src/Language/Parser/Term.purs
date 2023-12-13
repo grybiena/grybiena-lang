@@ -4,17 +4,19 @@ module Language.Parser.Term where
 import Prelude
 
 import Control.Alt ((<|>))
+import Control.Comonad.Cofree ((:<))
 import Control.Lazy (defer)
 import Control.Monad.Cont (lift)
-import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRec, tailRecM)
+import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Control.Monad.State (class MonadState)
-import Data.Array (fromFoldable, head, intersperse, replicate)
+import Data.Array (fromFoldable, intersperse, replicate)
+import Data.Array as Array
 import Data.CodePoint.Unicode (isUpper)
-import Data.Foldable (foldl, foldr)
+import Data.Foldable (foldl)
 import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
 import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
-import Data.List (List(..), length, zip, (..), (:))
+import Data.List (List(..), length, (..), (:))
 import Data.List as List
 import Data.List.NonEmpty (NonEmptyList)
 import Data.List.NonEmpty as NonEmptyList
@@ -22,15 +24,17 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..), maybe)
 import Data.String (codePointFromChar)
 import Data.String.CodeUnits (fromCharArray, toCharArray)
+import Data.Traversable (sequence)
 import Data.Tuple (Tuple(..), fst, uncurry)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
-import Language.Lambda.Calculus (LambdaF, abs, absMany, app, appMany, cat, var)
-import Language.Lambda.Inference (arrMany, (:->:))
+import Language.Lambda.Calculus (LambdaF(..), absMany, app, appMany, cat, var)
+import Language.Lambda.Inference (appRule, arrMany, closeTerm, flat, infer, (:->:))
 import Language.Lambda.Module (Module(..))
-import Language.Lambda.Unification (class Fresh, TypingContext, fresh)
+import Language.Lambda.Unification (class Fresh, class InfiniteTypeError, class NotInScopeError, TypingContext, fresh)
+import Language.Lambda.Unification.Error (class ThrowUnificationError)
 import Language.Native (Native(..), native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
 import Language.Native.Reify (nativeTerm, reify)
@@ -38,7 +42,7 @@ import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos, withPos')
-import Language.Term (CaseAlternative(..), Ident(..), Match(..), Scope(..), TT(..), Term, Var(..))
+import Language.Term (CaseAlternative(..), Ident(..), Scope(..), TT(..), Term, TypedTerm, Var(..))
 import Parsing (fail, runParserT)
 import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -52,6 +56,10 @@ import Unsafe.Coerce (unsafeCoerce)
 instance
   ( Fresh Int m
   , MonadState (TypingContext Var Mu Var TT) m
+  , ThrowUnificationError Term m
+  , InfiniteTypeError Var Term m
+  , NotInScopeError Var m
+  , MonadRec m
   ) => BasisParser Parser m Mu Var TT where
   parseBasis = do
     t <- (parser (homogeneous {})).parseType
@@ -80,55 +88,53 @@ data Decl =
   | DataDecl DataTypeDecl (List DataValueDecl)
 
 data DataTypeDecl = DataTypeDecl String (List Var)
-data DataValueDecl = DataValueDecl String (List Var) -- (List Term)
+data DataValueDecl = DataValueDecl String (List Term) -- (List Term)
 
---dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
---dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
---  where
---    dataType :: Term
---    dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars) 
---    go (ds /\ Nil) = Done ds
---    go (ds /\ (DataValueDecl c ts):r) =
---      let constructorType :: Term
---          constructorType = absMany tyvars (arrMany (var <$> ts) dataType) 
---          typeDecl :: Decl
---          typeDecl = TypeDecl (Ident $ TermVar c) constructorType
---          valDecl :: Decl 
---          valDecl = ValueDecl (Ident $ TermVar c) (cat (Data (DataConstructor c (Just constructorType))))
---       in Loop ((typeDecl:valDecl:ds) /\ r)
-
-dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
-dataConstructors (DataTypeDecl tycon tyvars) = tailRec go <<< Tuple Nil
+dataConstructors :: forall m.
+                    MonadRec m
+                 => MonadState (TypingContext Var Mu Var TT) m
+                 => ThrowUnificationError Term m
+                 => InfiniteTypeError Var Term m
+                 => NotInScopeError Var m
+                 => DataTypeDecl -> List DataValueDecl -> m (List Decl)
+dataConstructors (DataTypeDecl tycon tyvars) = tailRecM go <<< Tuple Nil
   where
     dataType :: Term
     dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars) 
-    go (ds /\ Nil) = Done ds
+    go (ds /\ Nil) = pure $ Done ds
     go (ds /\ (DataValueDecl c ts):r) =
       let constructorType :: Term
-          constructorType = absMany ts (arrMany (var <$> ts) dataType) 
+          constructorType = closeTerm (arrMany ts dataType) 
           typeDecl :: Decl
           typeDecl = TypeDecl (Ident $ TermVar c) constructorType
-          liftConstructor :: Match -> Match
-          liftConstructor x = 
-            case length ts of
-              0 -> x
-              1 -> let Match m = x
-                    in Match (unsafeCoerce (\g -> DataApp (unsafeCoerce m) (DataNative (unsafeCoerce g))))
-              2 -> let Match m = x
-                    in Match (unsafeCoerce (\g h -> DataApp (DataApp (unsafeCoerce m) (DataNative (unsafeCoerce g))) (DataNative (unsafeCoerce h))))
-              _ -> unsafeCoerce "needs templated aaaaaaa"
- 
-          liftedConstructor :: Term
-          liftedConstructor = cat $ Native $ Purescript {
-               nativeType: constructorType
-             , nativePretty: c
-             , nativeTerm:
-                 let Match a = liftConstructor (Match (unsafeCoerce (DataConstructor c (Just constructorType))))
-                     in unsafeCoerce a
-             }
-          valDecl :: Decl 
-          valDecl = ValueDecl (Ident $ TermVar c) liftedConstructor
-       in Loop ((typeDecl:valDecl:ds) /\ r)
+          dataApp :: Var -> TypedTerm -> m TypedTerm
+          dataApp v t = do
+             a <- fresh
+             b <- fresh
+             o <- fresh
+             let dapp :: Term
+                 dapp = cat (Native (Purescript {
+                              nativeType: (a :->: b) :->: a :->: b 
+                            , nativeTerm: unsafeCoerce $ \f g -> DataApp f (DataNative (unsafeCoerce g))
+                            , nativePretty: "DataApp"
+                            }))
+             g <- infer dapp
+             h <- appRule g t
+             appRule h (o :< Var v)
+          dataCon :: TypedTerm
+          dataCon = constructorType :< Cat (Native (Purescript {
+                              nativeType: constructorType
+                            , nativeTerm: unsafeCoerce $ DataConstructor c (Just constructorType)
+                            , nativePretty: c 
+                            }))
+          dataVars :: m (Array Var)
+          dataVars = sequence (replicate (length ts) fresh) 
+       in do
+          vs <- dataVars
+          floop <- foldl (\b v -> b >>= dataApp v) (pure dataCon) vs
+          let valDecl :: Decl 
+              valDecl = ValueDecl (Ident $ TermVar c) (absMany vs (flat floop)) 
+          pure $ Loop ((typeDecl:valDecl:ds) /\ r)
 
 
 instance Show Decl where
@@ -142,6 +148,10 @@ instance Show Decl where
 
 parser :: forall names row m.
           Fresh Int m
+       => MonadRec m
+       => ThrowUnificationError Term m
+       => InfiniteTypeError Var Term m
+       => NotInScopeError Var m
        => MonadState (TypingContext Var Mu Var TT) m
        => ToHomogeneousRow names (IndentParserT m (Native Term)) row
        => NativeModule names (IndentParserT m (Native Term))
@@ -188,7 +198,9 @@ parser mod = {
         annotateVals (d /\ ((TypeDecl vt t):(ValueDecl vv v):r)) | vt == vv =
            pure $ Loop (((vv /\ (cat $ TypeAnnotation v t)):d) /\ r)
         annotateVals (_ /\ (TypeDecl vt _):r) = fail $ prettyPrint vt <> " type declaration not followed by value declaration. " <> show r
-        annotateVals (d /\ ((DataDecl dtc z):r)) = pure $ Loop (d /\ (dataConstructors dtc z <> r))
+        annotateVals (d /\ ((DataDecl dtc z):r)) = do
+           dcs <- lift $ lift $ dataConstructors dtc z
+           pure $ Loop (d /\ (dcs <> r))
         parseTypeDecl = do
            v <- parseTermVar 
            reservedOp "::"
@@ -211,14 +223,14 @@ parser mod = {
            pure (DataTypeDecl con tvs)
         parseDataValueDecl = do
            dcon <- parseDataConstructor'
-           tvs <- many (indented *> parseTypeVar)
+           tvs <- many (indented *> parseTypeAtom)
            pure $ DataValueDecl dcon tvs
 
 
     parseBinder :: Monad m => IndentParserT m Term
     parseBinder = do
       i <- identifier 
-      if Just false == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+      if Just false == ((isUpper <<< codePointFromChar) <$> (Array.head $ toCharArray i))
         then pure $ cat $ Binder i
         else fail "Binders must not start with an upper case char"
 
@@ -227,7 +239,7 @@ parser mod = {
     parseTermVar :: Monad m => IndentParserT m Var
     parseTermVar = do
       i <- identifier 
-      if Just false == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+      if Just false == ((isUpper <<< codePointFromChar) <$> (Array.head $ toCharArray i))
         then pure $ Ident $ TermVar i
         else fail "Term variables must not start with an upper case char"
 
@@ -241,7 +253,7 @@ parser mod = {
     parseDataConstructor' :: Monad m => IndentParserT m String
     parseDataConstructor' = do
       i <- identifier 
-      if Just true == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+      if Just true == ((isUpper <<< codePointFromChar) <$> (Array.head $ toCharArray i))
         then pure i
         else fail "Data constructors must start with an upper case char"
 
@@ -250,14 +262,14 @@ parser mod = {
     parseTypeVar :: Monad m => IndentParserT m Var
     parseTypeVar = do
       i <- identifier 
-      if Just false == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+      if Just false == ((isUpper <<< codePointFromChar) <$> (Array.head $ toCharArray i))
         then pure $ Ident $ TypeVar i
         else fail "Type variables must not start with an upper case char"
 
     parseTypeConstructor :: Monad m => IndentParserT m Var
     parseTypeConstructor = do
       i <- identifier 
-      if Just true == ((isUpper <<< codePointFromChar) <$> (head $ toCharArray i))
+      if Just true == ((isUpper <<< codePointFromChar) <$> (Array.head $ toCharArray i))
         then pure $ Ident $ TypeVar i
         else fail "Type constructors must start with an upper case char"
 

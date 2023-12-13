@@ -2,17 +2,17 @@ module Language.Lambda.Unification.Error where
 
 import Prelude
 
-import Control.Monad.Cont (lift)
+import Control.Monad.Cont (class MonadTrans, lift)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (ExceptT)
 import Data.Array (intercalate)
 import Data.Array as Array
 import Data.Eq.Generic (genericEq)
 import Data.Generic.Rep (class Generic)
-import Language.Lambda.Module (Module(..))
 import Data.Map as Map
 import Data.Show.Generic (genericShow)
 import Language.Lambda.Calculus (LambdaF)
+import Language.Lambda.Module (Module(..))
 import Parsing (ParseError)
 import Prettier.Printer (text, (<+>))
 import Pretty.Printer (class Pretty, pretty)
@@ -47,11 +47,17 @@ instance Monad m => ThrowRecursiveModuleError f var cat (ExceptT (UnificationErr
   recursiveModuleError = throwError <<< RecursiveModuleError
 
 
-instance Monad m => ThrowUnificationError (f (LambdaF var var cat)) (ExceptT ParseError (ExceptT (UnificationError f var cat) m)) where 
-  unificationError a b = lift $ throwError (UnificationError a b)
 
 instance Monad m => ThrowUnificationError (f (LambdaF var var cat)) (ExceptT (UnificationError f var cat) m) where 
   unificationError a b = throwError (UnificationError a b)
+else
+instance
+  ( Monad (t m)
+  , ThrowUnificationError (f (LambdaF var var cat)) m
+  , MonadTrans t
+  ) =>  ThrowUnificationError (f (LambdaF var var cat)) (t m) where 
+  unificationError a b = lift $ unificationError a b
+
 
 
 class Monad m <= ThrowNativeTypeParseError m where

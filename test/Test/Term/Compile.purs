@@ -23,8 +23,8 @@ import Effect.Aff.Class (class MonadAff, liftAff)
 import Language.Lambda.Calculus (LambdaF(..))
 import Language.Lambda.Inference (flat, infer)
 import Language.Lambda.Reduction (elimReduce)
-import Language.Lambda.Unification (class Fresh, TypingContext, runUnificationT)
-import Language.Lambda.Unification.Error (UnificationError)
+import Language.Lambda.Unification (class Fresh, class InfiniteTypeError, class NotInScopeError, TypingContext, runUnificationT)
+import Language.Lambda.Unification.Error (class ThrowUnificationError, UnificationError)
 import Language.Native (Native(..))
 import Language.Parser.Term (Parser)
 import Language.Term (TT(..), Var, Term)
@@ -89,6 +89,9 @@ instance Show CompileError where
 
 compiles :: forall m.
            MonadState (TypingContext Var Mu Var TT) m
+        => ThrowUnificationError Term m
+        => InfiniteTypeError Var Term m
+        => NotInScopeError Var m
         => MonadThrow (UnificationError Mu Var TT) m
         => Fresh Int m
         => MonadRec m

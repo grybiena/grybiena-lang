@@ -8,7 +8,8 @@ import Data.Either (Either)
 import Data.Functor.Mu (Mu)
 import Language.Kernel.Effect (effectNatives)
 import Language.Kernel.Pure (pureModule)
-import Language.Lambda.Unification (TypingContext)
+import Language.Lambda.Unification (class InfiniteTypeError, class NotInScopeError, TypingContext)
+import Language.Lambda.Unification.Error (class ThrowUnificationError)
 import Language.Native (Native)
 import Language.Native.Module (NativeModule, nativeModuleUnion)
 import Language.Native.Reify (nativeModule)
@@ -24,7 +25,13 @@ import Type.Proxy (Proxy(..))
 
 
 
-typeParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term) 
+typeParser :: forall m.
+              MonadState (TypingContext Var Mu Var TT) m
+           => ThrowUnificationError Term m
+           => InfiniteTypeError Var Term m
+           => NotInScopeError Var m
+           => MonadRec m
+           => String -> m (Either ParseError Term) 
 typeParser s = runStringParserT s do
   let someKernel = nativeModuleUnion (nativeModule pureModule) (unsafeModule (Proxy :: Proxy Parser) effectNatives)
   v <- (parser someKernel).parseType
@@ -32,7 +39,13 @@ typeParser s = runStringParserT s do
   pure v
 
 
-termParser :: forall m. MonadState (TypingContext Var Mu Var TT) m => MonadRec m => String -> m (Either ParseError Term)
+termParser :: forall m.
+              MonadState (TypingContext Var Mu Var TT) m
+           => ThrowUnificationError Term m
+           => InfiniteTypeError Var Term m
+           => NotInScopeError Var m
+           => MonadRec m
+           => String -> m (Either ParseError Term)
 termParser s = runStringParserT s do
   let mm :: NativeModule _ (IndentParserT m (Native Term))
       mm = (unsafeModule (Proxy :: Proxy Parser) effectNatives)

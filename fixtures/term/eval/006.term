@@ -1,0 +1,14 @@
+let
+  data Foo a =
+      Bar Number
+    | Baz Int a
+
+  data Doo a b =
+      Da a b
+    | Do Int b
+
+
+in case (Baz 1 2) (Da 3 4) of
+     (Bar x) (Do a b) => 1
+     (Baz o p) (Da f h) => intPlus (intPlus o p) (intPlus f h) 
+

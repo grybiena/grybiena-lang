@@ -3,7 +3,7 @@ module Language.Term where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
-import Control.Monad.Cont (lift)
+import Control.Monad.Cont (class MonadTrans, lift)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (ExceptT)
 import Control.Monad.State (class MonadState)
@@ -27,18 +27,16 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
 import Data.Tuple (fst)
 import Data.Tuple.Nested (type (/\), (/\))
-import Effect.Class (class MonadEffect)
 import Effect.Exception (error)
 import Language.Kernel.Data (Data(..))
 import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, freeIn, freeTyped, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, arrow, closeTerm, flat, infer, (:->:))
 import Language.Lambda.Module (Module(..), sequenceBindings)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, require, rewrite, substitute, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, infiniteTypeError, notInScopeError, require, rewrite, substitute, unify)
 import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class ThrowUnificationError, UnificationError(..), recursiveModuleError, unificationError)
 import Language.Native (class NativeValue, Native(..))
 import Matryoshka.Class.Recursive (project)
-import Parsing (ParseError)
 import Prettier.Printer (beside, stack, text, (<+>), (</>))
 import Pretty.Printer (class Pretty, pretty, prettyPrint)
 import Prim (Array, Boolean, Int, Number, Record, String)
@@ -299,17 +297,30 @@ instance Enumerable Var where
   fromInt = Ident <<< fromInt
 
 
-instance Monad m => NotInScopeError Var (ExceptT ParseError (ExceptT (UnificationError Mu Var TT) m)) where 
-  notInScopeError = lift <<< throwError <<< NotInScope
 
 instance Monad m => NotInScopeError Var (ExceptT (UnificationError Mu Var TT) m) where 
   notInScopeError = throwError <<< NotInScope
+else
+instance
+  ( Monad m
+  , Monad (t m)
+  , MonadTrans t
+  , NotInScopeError Var m
+  ) => NotInScopeError Var (t m) where 
+  notInScopeError = lift <<< notInScopeError 
 
-instance Monad m => InfiniteTypeError Var Term (ExceptT ParseError (ExceptT (UnificationError Mu Var TT) m)) where
-  infiniteTypeError v t = lift $ throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
+
 
 instance Monad m => InfiniteTypeError Var Term (ExceptT (UnificationError Mu Var TT) m) where
   infiniteTypeError v t = throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
+else
+instance
+  ( Monad m
+  , InfiniteTypeError Var Term m 
+  , MonadTrans t
+  , Monad (t m)
+  ) => InfiniteTypeError Var Term (t m) where
+  infiniteTypeError v t = lift $ infiniteTypeError v t 
 
 
 
@@ -319,7 +330,7 @@ instance
   , Fresh Var m
   , Skolemize Mu Var TT
   , MonadState (TypingContext Var Mu Var TT) m
-  , MonadEffect m
+  , Monad m
   , NotInScopeError Var m
   ) => Unify Var Term m where
   unify v@(Ident i) t =
@@ -344,7 +355,7 @@ instance
   ( Fresh Var m
   , Skolemize Mu Var TT
   , MonadState (TypingContext Var Mu Var TT) m
-  , MonadEffect m
+  , Monad m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
   , NotInScopeError Var m
@@ -369,7 +380,7 @@ instance
   unify a b = unificationError (cat a) (cat b)
 
 instance
-  ( MonadEffect m
+  ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowUnificationError Term m
@@ -445,7 +456,7 @@ instance
  
 
 instance
-  ( MonadEffect m
+  ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowUnificationError Term m
@@ -483,7 +494,7 @@ instance
       _ -> pure $ ty :< App a b 
 
 instance
-  ( MonadEffect m
+  ( Monad m
   , Unify Term Term m
   , MonadState (TypingContext Var Mu Var TT) m
   , ThrowRecursiveModuleError Mu Var TT m
@@ -584,7 +595,7 @@ reduceCase caseTy branches = foldr reduceBranch fallThrough branches
           match = matchTy :< Cat (Native (Purescript {
                                  nativeType: matchTy
                                  , nativePretty: "match (" <> Array.fold (intersperse "," (Array.fromFoldable (prettyPrint <$> (flat <$> patterns :: NonEmptyList Term)))) <> ")"
-                                , nativeTerm:  --unsafeCoerce $ const $ const $ const (error "Pattern match failed.")
+                                , nativeTerm:
                                     unsafeCoerce $ \branching falling arg ->
                                       let Match q =
                                               matchCase falling

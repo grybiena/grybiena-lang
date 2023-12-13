@@ -1,0 +1,10 @@
+let
+  data Foo a =
+      Bar Number
+    | Baz Int a
+
+
+in case (Baz 1 2) of
+     (Bar x) => 1
+     (Baz o p) => intPlus o p 
+
