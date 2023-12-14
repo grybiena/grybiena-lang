@@ -181,8 +181,7 @@ instance
   , AllVars var' var' cat' 
   , Shadow var' -- TODO is it safe to only consider shadows?
   ) => Substitute var' cat' f m where
-  substitute v t' = do
-     t <- rewrite t'
+  substitute v t = do 
      when (v `occursIn` t) $ infiniteTypeError v t 
      u <- rewrite (var v :: f (TermF var' cat'))
      case project u of

@@ -43,7 +43,7 @@ import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos, withPos')
-import Language.Term (CaseAlternative(..), Ident(..), Scope(..), TT(..), Term, TypedTerm, Var(..), freshTermVar)
+import Language.Term (CaseAlternative(..), DataType(..), DataTypeDecl(..), DataValueDecl(..), Ident(..), Scope(..), TT(..), Term, TypedTerm, Var(..), freshTermVar)
 import Parsing (fail, runParserT)
 import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -88,8 +88,6 @@ data Decl =
   | ValueDecl Var Term
   | DataDecl DataTypeDecl (List DataValueDecl)
 
-data DataTypeDecl = DataTypeDecl String (List Var)
-data DataValueDecl = DataValueDecl String (List Term) -- (List Term)
 
 dataConstructors :: forall m.
                     MonadRec m
@@ -98,58 +96,11 @@ dataConstructors :: forall m.
                  => InfiniteTypeError Var Term m
                  => NotInScopeError Var m
                  => DataTypeDecl -> List DataValueDecl -> m (List Decl)
-dataConstructors (DataTypeDecl tycon tyvars) = tailRecM go <<< Tuple Nil
+dataConstructors t@(DataTypeDecl tc _) cs = pure $ ty:(co <$> cs) 
   where
-    dataType :: Term
-    dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars) 
-    go (ds /\ Nil) = pure $ Done ds
-    go (ds /\ (DataValueDecl c ts):r) =
-      let constructorType :: Term
-          constructorType = closeTerm (arrMany ts dataType) 
-          dataApp :: Var -> TypedTerm -> m TypedTerm
-          dataApp v t = do
-             traceM $ prettyPrint (head t)
-             a <- fresh
-             b <- fresh
-             o <- fresh
-             let foo = (a :->: b) :->: a :->: b 
-                 dapp :: Term -> Term
-                 dapp z = cat (Native (Purescript {
-                              nativeType: z 
-                            , nativeTerm: unsafeCoerce $ \f g -> DataApp f (DataNative (unsafeCoerce g))
-                            , nativePretty: "DataApp"
-                            }))
-             g <- infer (dapp foo)
-             _ <- appRule g t
-             foo' <- rewrite foo
-             g' <- infer (dapp foo')
-             h' <- appRule g' t
-             traverse rewrite =<< appRule h' (o :< Var v)
-          dataCon :: m TypedTerm
-          dataCon = do
-             ct <- closeTerm <$> renameFresh constructorType
-             pure $ ct :< Cat (Native (Purescript {
-                              nativeType: ct
-                            , nativeTerm: unsafeCoerce $ DataConstructor c (Just constructorType)
-                            , nativePretty: c 
-                            }))
-          dataVars :: m (Array Var)
-          dataVars = sequence (replicate (length ts) freshTermVar) 
-       in do
-          vs <- dataVars
-          floop <- foldl (\b v -> b >>= dataApp v) (dataCon) vs
-          traceM $ (prettyPrint (absMany vs (flat floop) :: Term))
-          traceM (prettyPrint $ head floop)
-          let s = (absMany vs (flat floop))
-          s' <- infer s
-          traceM (prettyPrint $ head s')
-          let valDecl :: Decl 
-              valDecl = ValueDecl (Ident $ TermVar c) s 
-              typeDecl :: Decl
-              typeDecl = TypeDecl (Ident $ TermVar c) (head s')
-
-          pure $ Loop ((typeDecl:valDecl:ds) /\ r)
-
+    dt = (DataType t cs)
+    ty = ValueDecl (Ident $ TypeVar tc) (cat (TypeCon tc dt)) 
+    co (DataValueDecl c _) = ValueDecl (Ident $ TermVar c) (cat (DataCon c dt)) 
 
 instance Show Decl where
   show (TypeDecl v t) = prettyPrint v <> " :: " <> prettyPrint t
@@ -224,9 +175,9 @@ parser mod = {
            v <- parseTermVar 
            reservedOp "="
            b <- parseValue
-           pure (ValueDecl v b)   
+           pure (ValueDecl v b)
         parseDataDecl = withPos' (reserved "data") do
-           dtc <- parseDataTypeDecl
+           dtc@(DataTypeDecl c _) <- parseDataTypeDecl
            reservedOp "="
            fcon <- withPos parseDataValueDecl
            dcons <- many (indented *> (reservedOp "|") *> withPos parseDataValueDecl)

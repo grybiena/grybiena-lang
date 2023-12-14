@@ -7,7 +7,7 @@ import Control.Monad.Cont (class MonadTrans, lift)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (ExceptT)
 import Control.Monad.State (class MonadState)
-import Data.Array (intersperse, replicate)
+import Data.Array (fold, intersperse, replicate)
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Eq (class Eq1)
@@ -15,7 +15,7 @@ import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable, foldMap, foldl, foldr, sequence_)
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
-import Data.List (List(..))
+import Data.List (List(..), find)
 import Data.List as List
 import Data.List.NonEmpty (NonEmptyList, foldM, singleton, zipWith)
 import Data.List.NonEmpty as NonEmptyList
@@ -27,13 +27,14 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
 import Data.Tuple (fst)
 import Data.Tuple.Nested (type (/\), (/\))
+import Debug (traceM)
 import Effect.Exception (error)
 import Language.Kernel.Data (Data(..))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, cat, freeIn, freeTyped, prettyVar, replace, replaceFree, shadow, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, appMany, cat, freeIn, freeTyped, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, arrow, closeTerm, flat, infer, (:->:))
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, absRule, appRule, arrMany, arrow, closeTerm, flat, infer, (:->:))
 import Language.Lambda.Module (Module(..), sequenceBindings)
-import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, infiniteTypeError, notInScopeError, require, rewrite, substitute, unify)
+import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, infiniteTypeError, notInScopeError, renameFresh, require, rewrite, substitute, unify)
 import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class ThrowUnificationError, UnificationError(..), recursiveModuleError, unificationError)
 import Language.Native (class NativeValue, Native(..))
 import Matryoshka.Class.Recursive (project)
@@ -85,6 +86,13 @@ data TT a =
   | Data (Data Term)
   | Case (NonEmptyList a) (NonEmptyList (CaseAlternative a)) 
   | TTuple (NonEmptyList a)
+  | DataCon String DataType
+  | TypeCon String DataType
+
+data DataType = DataType DataTypeDecl (List DataValueDecl)
+
+data DataTypeDecl = DataTypeDecl String (List Var)
+data DataValueDecl = DataValueDecl String (List Term)
 
 
 -- a Class is a dictionary of types
@@ -107,6 +115,31 @@ instance NativeValue Mu Var TT where
 instance (Pretty a, Show a) => Show (TT a) where
   show (TypeAnnotation a t) = "TypeAnnotation " <> show a <> " " <> show t
   show e = genericShow e
+
+
+derive instance Generic DataType _
+instance Eq DataType where
+  eq = genericEq
+
+instance Show DataType where
+  show (DataType (DataTypeDecl t vs) cs) = 
+    let prettyCon (DataValueDecl s v) = foldl beside (text s) (pretty <$> v)
+     in prettyPrint $ text "data" <+> foldl beside (text t) (pretty <$> vs)
+                                  <+> text "="
+                                  <+> foldl beside (text "") (intersperse (text "|") (Array.fromFoldable $ prettyCon <$> cs))
+
+
+instance Show DataTypeDecl where
+  show (DataTypeDecl c ts) = c <> " " <> fold (intersperse " " (Array.fromFoldable (prettyPrint <$> ts)))
+
+instance Eq DataTypeDecl where
+  eq (DataTypeDecl ta va) (DataTypeDecl tb vb) = ta == tb && va == vb
+
+instance Show DataValueDecl where
+  show (DataValueDecl s ts) = s <> " " <> fold (intersperse " " (Array.fromFoldable (prettyPrint <$> ts)))
+
+instance Eq DataValueDecl where
+  eq (DataValueDecl ta va) (DataValueDecl tb vb) = ta == tb && va == vb
 
 instance IsStar Mu Var Var TT where
   isStar t = case project t of
@@ -132,6 +165,9 @@ instance Functor TT where
   map _ (Data d) = Data d
   map f (Case a e) = Case (map f a) (map f <$> e)
   map f (TTuple t) = TTuple (map f t)
+  map _ (DataCon t vs) = DataCon t vs
+  map _ (TypeCon t vs) = TypeCon t vs
+
 
 instance Traversable TT where
   traverse _ Arrow = pure Arrow
@@ -145,6 +181,8 @@ instance Traversable TT where
   traverse _ (Data d) = pure $ Data d
   traverse f (Case o b) = Case <$> traverse f o <*> traverse (traverse f) b
   traverse f (TTuple t) = TTuple <$> traverse f t
+  traverse _ (DataCon t vs) = pure (DataCon t vs)
+  traverse _ (TypeCon t vs) = pure (TypeCon t vs)
   sequence = traverse identity
 
 instance Skolemize Mu Var TT where
@@ -170,6 +208,9 @@ instance Foldable TT where
   foldr _ b (Data _) = b
   foldr f b (Case a e) = foldl (foldr f) (foldr f b a) e
   foldr f b (TTuple t) = foldr f b t
+  foldr _ b (DataCon _ _) = b
+  foldr _ b (TypeCon _ _) = b
+
   foldl _ b (Star _) = b
   foldl _ b Arrow = b
   foldl f b (Let bs bd) = f (foldl f b bs) bd
@@ -181,6 +222,9 @@ instance Foldable TT where
   foldl _ b (Data _) = b
   foldl f b (Case a e) = foldl (foldl f) (foldl f b a) e
   foldl f b (TTuple t) = foldl f b t
+  foldl _ b (DataCon _ _) = b
+  foldl _ b (TypeCon _ _) = b
+
   foldMap _ (Star _) = mempty
   foldMap _ Arrow = mempty
   foldMap f (Let bs b) = foldMap f bs <> f b
@@ -192,6 +236,9 @@ instance Foldable TT where
   foldMap _ (Data _) = mempty
   foldMap f (Case a e) = foldMap f a <> foldMap (foldMap f) e
   foldMap f (TTuple t) = foldMap f t
+  foldMap _ (DataCon _ _) = mempty
+  foldMap _ (TypeCon _ _) = mempty
+
 
 newtype Scope = Scope Int
 derive newtype instance Show Scope
@@ -284,6 +331,9 @@ instance PrettyLambda Var Var TT where
             foldl beside mempty (pretty <$> patterns) <+> prettyGuard guard <+> text "=>" <+> pretty body
           prettyGuard = maybe mempty (\g -> text "|" <+> pretty g)
   prettyCat (TTuple t) = text "(" <> Array.fold (intersperse (text ",") (Array.fromFoldable (pretty <$> t)))  <> text ")"
+  prettyCat (DataCon c _) = text c 
+  prettyCat (TypeCon c _) = text c 
+
 
 
 
@@ -312,7 +362,7 @@ instance
 
 
 instance Monad m => InfiniteTypeError Var Term (ExceptT (UnificationError Mu Var TT) m) where
-  infiniteTypeError v t = throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v
+  infiniteTypeError v t = throwError $ Err $ "An infinite type was inferred for an expression: " <> prettyPrint t <> " while trying to match type " <> prettyPrint v <> " ||| " <> show v <> " ~ " <> show t
 else
 instance
   ( Monad m
@@ -333,18 +383,21 @@ instance
   , Monad m
   , NotInScopeError Var m
   ) => Unify Var Term m where
-  unify v@(Ident i) t =
+  unify v@(Ident i) t' = do
+    t <- rewrite t'
     case project t of
       Var (Ident j) | i == j -> pure unit
       _ -> substitute v t
-  unify v@(Skolemized _ _ i) t =
+  unify v@(Skolemized _ _ i) t' = do
+    t <- rewrite t'
     case project t of
       Var (Skolemized _ _ j) | i == j -> pure unit
       Var (Skolemized _ _ _) -> unificationError (var v) t
       -- TODO is substitution always safe?                             
       _ -> substitute v t
 --      _ -> throwError $ unificationError (var v) t
-  unify v@(Scoped _ _) t =
+  unify v@(Scoped _ _) t' = do
+    t <- rewrite t'
     case project t of
       Var x@(Scoped _ _) | v == x -> pure unit
       -- TODO is substitution always safe?
@@ -448,11 +501,23 @@ instance
   inference (Pattern c) = do
      t <- require (Ident $ TermVar c)
      pure (t :< Cat (Pattern c)) 
-  inference (Data (DataNative n)) = unsafeCoerce "TODO this should be impossible" 
+  inference (Data (DataNative n)) = unsafeCoerce $ error "TODO this should be impossible" 
   inference (Data (DataApp a b)) = do
      at <- head <$> infer (cat (Data a) :: Term)
      bt <- head <$> infer (cat (Data b) :: Term)
      pure $ ((app at bt) :< Cat (Data (DataApp a b)))
+  inference (DataCon c dt@(DataType (DataTypeDecl tycon tyvars) cs)) = do
+    case find (\(DataValueDecl c' _) -> c' == c) cs of
+      Nothing -> notInScopeError (Ident $ TermVar c) -- TODO use correct error
+      Just (DataValueDecl _ ts) -> do
+         let dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars)
+         ty <- renameFresh (arrMany ts dataType)
+         pure (ty :< Cat (DataCon c dt)) 
+  inference (TypeCon c dt@(DataType (DataTypeDecl tycon tyvars) cs)) = do
+     -- TODO infer the kind - this ain't right
+     pure (cat (Star 1) :< Cat (TypeCon c dt))
+ 
+
  
 
 instance
@@ -553,10 +618,42 @@ instance
                       in r :< App c (build so) 
             out = build z
         pure out 
+      DataCon c (DataType _ cs) -> do
+        case find (\(DataValueDecl c' _) -> c' == c) cs of
+          Nothing -> notInScopeError (Ident $ TermVar c) -- TODO use correct error
+          Just (DataValueDecl _ ts) -> do
+
+            let dataApp :: Var -> TypedTerm -> m TypedTerm
+                dataApp v z = do
+                   a <- fresh
+                   b <- fresh
+                   o <- require v
+                   let foo = (a :->: b) :->: a :->: b 
+                       dapp :: Term -> Term
+                       dapp x = cat (Native (Purescript {
+                                    nativeType: x 
+                                  , nativeTerm: unsafeCoerce $ \f g -> DataApp f (DataNative (unsafeCoerce g))
+                                  , nativePretty: "DataApp"
+                                  }))
+                   g <- infer (dapp foo)
+                   h <- appRule g z
+                   appRule h (o :< Var v)
+                dataCon :: m TypedTerm
+                dataCon = do
+                   pure $ t :< Cat (Native (Purescript {
+                                    nativeType: t
+                                  , nativeTerm: unsafeCoerce $ DataConstructor c (Just t)
+                                  , nativePretty: c 
+                                  }))
+                dataVars :: m (Array Var)
+                dataVars = sequence (replicate (List.length ts) freshTermVar)             
+            vs <- dataVars
+            foldr absRule (foldl (>>=) dataCon (dataApp <$> vs)) vs
       c -> pure $ t :< Cat c
 
 type TypedTerm = (Cofree (LambdaF Var Var TT) Term)
 
+freshTermVar :: forall m. Fresh Int m => m Var
 freshTermVar = do
   (i :: Int) <- fresh
   pure $ Ident $ TermVar $ "v" <> show i

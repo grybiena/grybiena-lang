@@ -22,15 +22,17 @@ let
   d :: Doo Int Int
   d = da 1 2
 
-  f :: forall a b. Doo a b -> Int -> Foo (Doo a b)
-  f = baz
+-- TODO this should check
+--  f :: forall a b. Doo a b -> Int -> Foo (Doo a b)
+--  f = baz
 
---  flip :: forall a b. Doo a b -> Doo b a
---  flip = \x -> case x of
---                 (Da a b) => Da b a
+  flip :: forall a b. Doo a b -> Doo b a
+  flip = \x -> case x of
+                 (Da a b) => Da b a
 
   h :: forall a b. Doo a b -> Doo a b
   h = \x -> x
 
-in 1 
+in case (flip (Da 1 8)) of
+     (Da a b) => a
 
