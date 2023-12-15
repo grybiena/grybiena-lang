@@ -29,7 +29,7 @@ import Data.Tuple (fst)
 import Data.Tuple.Nested (type (/\), (/\))
 import Effect.Exception (error)
 import Language.Kernel.Data (Data(..))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, appMany, cat, flat, freeIn, freeTyped, prettyVar, replace, replaceFree, shadow, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), appMany, cat, flat, freeIn, freeTyped, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, absRule, appRule, arrMany, arrow, closeTerm, infer, (:->:))
 import Language.Lambda.Judgement (class Reasoning)
@@ -83,7 +83,6 @@ data TT a =
   | Native (Native Term)
   | Binder String
   | Pattern String
-  | Data (Data Term)
   | Case (NonEmptyList a) (NonEmptyList (CaseAlternative a)) 
   | TTuple (NonEmptyList a)
   | DataCon String DataType
@@ -162,7 +161,6 @@ instance Functor TT where
   map _ (Native n) = Native n 
   map _ (Binder p) = Binder p
   map _ (Pattern p) = Pattern p
-  map _ (Data d) = Data d
   map f (Case a e) = Case (map f a) (map f <$> e)
   map f (TTuple t) = TTuple (map f t)
   map _ (DataCon t vs) = DataCon t vs
@@ -178,7 +176,6 @@ instance Traversable TT where
   traverse _ (Native n) = pure $ Native n 
   traverse _ (Binder p) = pure $ Binder p
   traverse _ (Pattern p) = pure $ Pattern p
-  traverse _ (Data d) = pure $ Data d
   traverse f (Case o b) = Case <$> traverse f o <*> traverse (traverse f) b
   traverse f (TTuple t) = TTuple <$> traverse f t
   traverse _ (DataCon t vs) = pure (DataCon t vs)
@@ -187,7 +184,7 @@ instance Traversable TT where
 
 instance Skolemize Mu Var TT where
   skolemize (Ident i) k = replaceFree (\x -> if x == Ident i then Just (var (Skolemized i k)) else Nothing) 
-  -- TODO error if the Var is not Scoped
+  -- TODO we should never end up with a Skolemized var here but we should check
   skolemize _ _ = identity
 
 instance Eq a => Eq (TT a) where
@@ -205,7 +202,6 @@ instance Foldable TT where
   foldr _ b (Native _) = b
   foldr _ b (Binder _) = b
   foldr _ b (Pattern _) = b
-  foldr _ b (Data _) = b
   foldr f b (Case a e) = foldl (foldr f) (foldr f b a) e
   foldr f b (TTuple t) = foldr f b t
   foldr _ b (DataCon _ _) = b
@@ -219,7 +215,6 @@ instance Foldable TT where
   foldl _ b (Native _) = b
   foldl _ b (Binder _) = b
   foldl _ b (Pattern _) = b
-  foldl _ b (Data _) = b
   foldl f b (Case a e) = foldl (foldl f) (foldl f b a) e
   foldl f b (TTuple t) = foldl f b t
   foldl _ b (DataCon _ _) = b
@@ -233,7 +228,6 @@ instance Foldable TT where
   foldMap _ (Native _) = mempty
   foldMap _ (Binder _) = mempty
   foldMap _ (Pattern _) = mempty
-  foldMap _ (Data _) = mempty
   foldMap f (Case a e) = foldMap f a <> foldMap (foldMap f) e
   foldMap f (TTuple t) = foldMap f t
   foldMap _ (DataCon _ _) = mempty
@@ -293,7 +287,6 @@ instance PrettyLambda Void Var TT where
   prettyAbs v _ = absurd v
   prettyApp f a = text "(" <> pretty f <+> pretty a <> text ")"
   prettyCat (Binder p) = text p
-  prettyCat (Data d) = pretty d
   prettyCat _  = text "TODO pattern category"
 
 instance PrettyLambda Var Var TT where
@@ -315,7 +308,6 @@ instance PrettyLambda Var Var TT where
   prettyCat (Native (Purescript { nativePretty })) = text nativePretty
   prettyCat (Binder p) = text p
   prettyCat (Pattern p) = text p
-  prettyCat (Data d) = pretty d
   prettyCat (Case a e) = text "case" <+> foldl beside mempty (pretty <$> a) <+> text "of"
                       </> stack (prettyAlt <$> List.fromFoldable e)
     where prettyAlt (CaseAlternative { patterns, guard, body }) =
@@ -411,7 +403,7 @@ instance
     unify na.nativeType nb.nativeType
     when (na.nativePretty /= nb.nativePretty) do
        unificationError (cat a) (cat b)
-  unify (Data (DataConstructor a _)) (Data (DataConstructor b _)) | a == b = pure unit
+  unify (TypeCon ta tca) (TypeCon tb tcb) | ta == tb && tca == tcb = pure unit
   unify (TTuple a) (TTuple b) = do
      sequence_ (zipWith unify a b)
   unify a b = unificationError (cat a) (cat b)
@@ -479,23 +471,14 @@ instance
   inference (TTuple t) = do
      t' <- sequence t
      pure $ ((cat (TTuple (head <$> t')) :< Cat (TTuple t')))
-  inference (Data (DataConstructor c (Just t))) = pure (t :< Cat (Data (DataConstructor c (Just t)))) 
-  inference (Data (DataConstructor c Nothing)) = do
-     t <- require (Ident $ TermVar c)
-     pure (t :< Cat (Data (DataConstructor c Nothing))) 
   inference (Pattern c) = do
      t <- require (Ident $ TermVar c)
      pure (t :< Cat (Pattern c)) 
-  inference (Data (DataNative n)) = unsafeCoerce $ error "TODO this should be impossible" 
-  inference (Data (DataApp a b)) = do
-     at <- head <$> infer (cat (Data a) :: Term)
-     bt <- head <$> infer (cat (Data b) :: Term)
-     pure $ ((app at bt) :< Cat (Data (DataApp a b)))
   inference (DataCon c dt@(DataType (DataTypeDecl tycon tyvars) cs)) = do
     case find (\(DataValueDecl c' _) -> c' == c) cs of
       Nothing -> notInScopeError (Ident $ TermVar c) -- TODO use correct error
       Just (DataValueDecl _ ts) -> do
-         let dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars)
+         let dataType = appMany (cat (TypeCon tycon dt)) (var <$> tyvars)
          ty <- closeTerm <$> renameFresh (arrMany ts dataType)
          pure (ty :< Cat (DataCon c dt)) 
   inference (TypeCon c dt@(DataType (DataTypeDecl tycon tyvars) cs)) = do
@@ -528,19 +511,6 @@ instance
                                              , nativePretty
                                              , nativeTerm: na.nativeTerm nb.nativeTerm
                                              }))
---      Cat (Data d) /\ Cat (Data e) -> pure $ ty :< Cat (Data (DataApp d e))
---      Cat (Data d) /\ Cat (Native (Purescript { nativeTerm })) -> do
---        pure $ ty :< Cat (Data (DataApp d (DataNative (unsafeCoerce nativeTerm))))
---      Cat (Native (Purescript na)) /\ Cat (Data d) -> do
---        let nativePretty = "(" <> na.nativePretty <> " " <> prettyPrint (cat (Data d) :: Term) <> ")"
---            nativeType = ty
---        liftEffect $ log $ nativePretty 
---        liftEffect $ log $  prettyPrint (cat (Data d) :: Term)
---        pure $ ty :< Cat (Native (Purescript { nativeType
---                                             , nativePretty
---                                             , nativeTerm: na.nativeTerm d
---                                             }))
-
       _ -> pure $ ty :< App a b 
 
 instance
@@ -708,7 +678,7 @@ bindPattern :: Term -> Data Term -> Maybe (List Match)
 bindPattern (In (App a b)) (DataApp a' b') = append <$> bindPattern a a' <*> bindPattern b b'
 bindPattern t@(In (App _ _)) (DataNative n) = bindPattern t n 
 bindPattern (In (Cat (Pattern c))) (DataConstructor c' _) | c == c' = Just Nil
-bindPattern t@(In (Cat (Data (DataConstructor _ _)))) (DataNative n) = bindPattern t n 
+bindPattern t@(In (Cat _)) (DataNative n) = bindPattern t n 
 bindPattern (In (Var _)) (DataNative n) = Just $ pure $ Match n 
 bindPattern _ _ = Nothing
 

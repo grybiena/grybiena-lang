@@ -5,7 +5,6 @@ import Prelude
 
 import Control.Alt ((<|>))
 import Control.Lazy (defer)
-import Control.Monad.Cont (lift)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Control.Monad.State (class MonadState)
 import Data.Array (fromFoldable, intersperse, replicate)
@@ -26,12 +25,10 @@ import Data.String.CodeUnits (fromCharArray, toCharArray)
 import Data.Tuple (fst, uncurry)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
 import Language.Lambda.Calculus (LambdaF, absMany, app, cat, var)
 import Language.Lambda.Module (Module(..))
-import Language.Lambda.Unification (class Fresh, class InfiniteTypeError, class NotInScopeError, TypingContext)
-import Language.Lambda.Unification.Error (class ThrowUnificationError)
+import Language.Lambda.Unification (class Fresh, TypingContext)
 import Language.Native (Native, native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
 import Language.Native.Reify (nativeTerm, reify)
@@ -52,9 +49,6 @@ import Type.Proxy (Proxy(..))
 instance
   ( Fresh Int m
   , MonadState (TypingContext Mu Var TT) m
-  , ThrowUnificationError Term m
-  , InfiniteTypeError Var Term m
-  , NotInScopeError Var m
   , MonadRec m
   ) => BasisParser Parser m Mu Var TT where
   parseBasis = do
@@ -84,14 +78,8 @@ data Decl =
   | DataDecl DataTypeDecl (List DataValueDecl)
 
 
-dataConstructors :: forall m.
-                    MonadRec m
-                 => MonadState (TypingContext Mu Var TT) m
-                 => ThrowUnificationError Term m
-                 => InfiniteTypeError Var Term m
-                 => NotInScopeError Var m
-                 => DataTypeDecl -> List DataValueDecl -> m (List Decl)
-dataConstructors t@(DataTypeDecl tc _) cs = pure $ ty:(co <$> cs) 
+dataConstructors :: DataTypeDecl -> List DataValueDecl -> List Decl
+dataConstructors t@(DataTypeDecl tc _) cs = ty:(co <$> cs) 
   where
     dt = (DataType t cs)
     ty = ValueDecl (Ident $ TypeVar tc) (cat (TypeCon tc dt)) 
@@ -109,9 +97,6 @@ instance Show Decl where
 parser :: forall names row m.
           Fresh Int m
        => MonadRec m
-       => ThrowUnificationError Term m
-       => InfiniteTypeError Var Term m
-       => NotInScopeError Var m
        => MonadState (TypingContext Mu Var TT) m
        => ToHomogeneousRow names (IndentParserT m (Native Term)) row
        => NativeModule names (IndentParserT m (Native Term))
@@ -159,7 +144,7 @@ parser mod = {
            pure $ Loop (((vv /\ (cat $ TypeAnnotation v t)):d) /\ r)
         annotateVals (_ /\ (TypeDecl vt _):r) = fail $ prettyPrint vt <> " type declaration not followed by value declaration. " <> show r
         annotateVals (d /\ ((DataDecl dtc z):r)) = do
-           dcs <- lift $ lift $ dataConstructors dtc z
+           let dcs = dataConstructors dtc z
            pure $ Loop (d /\ (dcs <> r))
         parseTypeDecl = do
            v <- parseTermVar 
@@ -203,8 +188,6 @@ parser mod = {
         then pure $ Ident $ TermVar i
         else fail "Term variables must not start with an upper case char"
 
-    parseDataConstructor :: forall abs . Monad m => IndentParserT m (Mu (LambdaF abs Var TT))
-    parseDataConstructor = (cat <<< Data <<< flip DataConstructor Nothing) <$> parseDataConstructor'
 
     parsePatternConstructor :: forall abs . Monad m => IndentParserT m (Mu (LambdaF abs Var TT))
     parsePatternConstructor = (cat <<< Pattern) <$> parseDataConstructor'
