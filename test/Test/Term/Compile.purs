@@ -5,12 +5,15 @@ import Prelude
 import Control.Comonad.Cofree (head, tail)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Except (runExceptT)
+import Control.Monad.RWS (RWSResult(..))
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState)
+import Control.Monad.Writer (class MonadWriter)
 import Data.Array (catMaybes, elem, nub, (!!))
 import Data.Either (Either(..))
 import Data.Functor.Mu (Mu)
 import Data.Generic.Rep (class Generic)
+import Data.List (List)
 import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
 import Data.String (split)
@@ -20,8 +23,9 @@ import Data.Tuple (Tuple(..), fst)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff.Class (class MonadAff, liftAff)
-import Language.Lambda.Calculus (LambdaF(..))
-import Language.Lambda.Inference (flat, infer)
+import Language.Lambda.Calculus (LambdaF(..), flat)
+import Language.Lambda.Inference (infer)
+import Language.Lambda.Judgement (class Reasoning, Judgement)
 import Language.Lambda.Reduction (elimReduce)
 import Language.Lambda.Unification (class Fresh, class InfiniteTypeError, class NotInScopeError, TypingContext, runUnificationT)
 import Language.Lambda.Unification.Error (class ThrowUnificationError, UnificationError)
@@ -69,7 +73,7 @@ buildCompileTest (CompileTest te ty) = testCompileTerm te <$> (readTextFile UTF8
 
 testCompileTerm :: String -> String -> String -> TestSuite
 testCompileTerm nm v t = test nm do
-  res <- fst <$> (runUnificationT $ compiles v t)
+  RWSResult _ res _ <- (runUnificationT $ compiles v t)
   case res of
     Left (err :: UnificationError Mu Var TT) -> liftAff $ Assert.assert (show err) false
     Right (Left (err :: CompileError)) -> liftAff $ Assert.assert (show err) false
@@ -88,7 +92,8 @@ instance Show CompileError where
 
 
 compiles :: forall m.
-           MonadState (TypingContext Var Mu Var TT) m
+           MonadState (TypingContext Mu Var TT) m
+        => MonadWriter (List (Judgement Mu Var Var TT)) m 
         => ThrowUnificationError Term m
         => InfiniteTypeError Var Term m
         => NotInScopeError Var m

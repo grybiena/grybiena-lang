@@ -10,9 +10,10 @@ import Data.Traversable (class Traversable)
 import Data.Tuple (fst)
 import Effect.Class (class MonadEffect)
 import Language.Lambda.Basis (class Basis, basisB, basisC, basisI, basisK, basisS)
-import Language.Lambda.Calculus (class FreeVars, class Shadow, LambdaF(..), freeIn, var)
+import Language.Lambda.Calculus (class FreeVars, class Shadow, LambdaF(..), flat, freeIn, var)
 import Language.Lambda.Elimination.Algebra (EliminationAlgebra(..))
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsTypeApp, appRule, closeTerm, flat, unifyWithArrow, (:->:))
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsTypeApp, appRule, closeTerm, unifyWithArrow, (:->:))
+import Language.Lambda.Judgement (class Reasoning)
 import Language.Lambda.Unification (class Context, class Fresh, class NotInScopeError, class Skolemize, class Substitute, class Unify)
 import Language.Lambda.Unification.Error (class ThrowUnificationError)
 import Matryoshka (AlgebraM, CoalgebraM, hyloM)
@@ -47,6 +48,7 @@ eliminate :: forall f var cat t m.
           => Composition f var cat m
           => Reduction f var cat m
           => FreeVars var var cat
+          => Reasoning f var var cat m
           => Proxy t
           -> Cofree (LambdaF var var cat) (f (LambdaF var var cat))
           -> m (Cofree (LambdaF var var cat) (f (LambdaF var var cat)))

@@ -22,9 +22,8 @@ let
   d :: Doo Int Int
   d = da 1 2
 
--- TODO this should check
---  f :: forall a b. Doo a b -> Int -> Foo (Doo a b)
---  f = baz
+  f :: forall a b. Doo a b -> Int -> Foo (Doo a b)
+  f = baz
 
   flip :: forall a b. Doo a b -> Doo b a
   flip = \x -> case x of
@@ -33,6 +32,9 @@ let
   h :: forall a b. Doo a b -> Doo a b
   h = \x -> x
 
-in case (flip (Da 1 8)) of
-     (Da a b) => a
+  bah :: Doo Boolean Int
+  bah = (Da false 6)
+
+in case (f (flip bah) 2) of
+     (Baz (Da a b) q) => intPlus a q
 

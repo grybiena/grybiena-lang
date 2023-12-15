@@ -3,13 +3,14 @@ module Test.Type.Infer where
 import Prelude
 
 import Control.Comonad.Cofree (head)
+import Control.Monad.RWS (RWSResult(..))
 import Data.Array (catMaybes, elem, nub, (!!))
 import Data.Either (Either(..))
 import Data.Functor.Mu (Mu)
 import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), split)
 import Data.Traversable (sequence_, traverse)
-import Data.Tuple (Tuple(..), fst)
+import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff.Class (liftAff)
@@ -56,7 +57,7 @@ buildInferTest (InferTest te ty) = testInferKind te <$> (readTextFile UTF8 te) <
 
 testInferKind :: String -> String -> String -> TestSuite
 testInferKind nm v t = test nm do
-  e <- fst <$> runUnificationT do
+  RWSResult _ e _ <- runUnificationT do
     vt <- typeParser v
     tt <- typeParser t
     case Tuple <$> vt <*> tt of

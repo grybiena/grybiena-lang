@@ -26,7 +26,7 @@ import Type.Proxy (Proxy(..))
 
 
 typeParser :: forall m.
-              MonadState (TypingContext Var Mu Var TT) m
+              MonadState (TypingContext Mu Var TT) m
            => ThrowUnificationError Term m
            => InfiniteTypeError Var Term m
            => NotInScopeError Var m
@@ -40,7 +40,7 @@ typeParser s = runStringParserT s do
 
 
 termParser :: forall m.
-              MonadState (TypingContext Var Mu Var TT) m
+              MonadState (TypingContext Mu Var TT) m
            => ThrowUnificationError Term m
            => InfiniteTypeError Var Term m
            => NotInScopeError Var m

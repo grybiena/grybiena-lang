@@ -33,7 +33,7 @@ class (Monad (t m), Monad m) <= Basis t m f var cat where
 instance
   ( MonadRec m
   , MonadThrow ParseError m
-  , MonadState (TypingContext var f var cat) m
+  , MonadState (TypingContext f var cat) m
   , NativeValue f var cat
   , Fresh var m
   , Ord var

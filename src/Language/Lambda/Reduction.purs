@@ -11,6 +11,7 @@ import Language.Lambda.Basis (class Basis)
 import Language.Lambda.Calculus (class FreeVars, class Shadow, LambdaF)
 import Language.Lambda.Elimination (class Composition, class Reduction, eliminate)
 import Language.Lambda.Inference (class ArrowObject, class Inference, class IsTypeApp)
+import Language.Lambda.Judgement (class Reasoning)
 import Language.Lambda.Unification (class Context, class Fresh, class NotInScopeError, class Skolemize, class Substitute, class Unify)
 import Language.Lambda.Unification.Error (class ThrowUnificationError)
 import Matryoshka.Class.Corecursive (class Corecursive)
@@ -46,6 +47,7 @@ elimReduce :: forall t f var cat m.
          => ArrowObject (cat (f (LambdaF var var cat))) 
          => Inference var var cat (f (LambdaF var var cat)) m 
          => FreeVars var var cat
+         => Reasoning f var var cat m
          => Eq1 cat
          => Proxy t
          -> Cofree (LambdaF var var cat) (f (LambdaF var var cat))

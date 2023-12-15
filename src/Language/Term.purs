@@ -27,12 +27,12 @@ import Data.String.CodeUnits (fromCharArray)
 import Data.Traversable (class Traversable, sequence, traverse, traverse_)
 import Data.Tuple (fst)
 import Data.Tuple.Nested (type (/\), (/\))
-import Debug (traceM)
 import Effect.Exception (error)
 import Language.Kernel.Data (Data(..))
-import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, appMany, cat, freeIn, freeTyped, prettyVar, replace, replaceFree, shadow, var)
+import Language.Lambda.Calculus (class PrettyLambda, class PrettyVar, class Shadow, Lambda, LambdaF(..), app, appMany, cat, flat, freeIn, freeTyped, prettyVar, replace, replaceFree, shadow, var)
 import Language.Lambda.Elimination (class Composition, class Reduction)
-import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, absRule, appRule, arrMany, arrow, closeTerm, flat, infer, (:->:))
+import Language.Lambda.Inference (class ArrowObject, class Inference, class IsStar, class IsTypeApp, absRule, appRule, arrMany, arrow, closeTerm, infer, (:->:))
+import Language.Lambda.Judgement (class Reasoning)
 import Language.Lambda.Module (Module(..), sequenceBindings)
 import Language.Lambda.Unification (class Enumerable, class Fresh, class InfiniteTypeError, class NotInScopeError, class Skolemize, class Unify, Skolem, TypingContext, assume, fresh, fromInt, infiniteTypeError, notInScopeError, renameFresh, require, rewrite, substitute, unify)
 import Language.Lambda.Unification.Error (class ThrowRecursiveModuleError, class ThrowUnificationError, UnificationError(..), recursiveModuleError, unificationError)
@@ -186,7 +186,7 @@ instance Traversable TT where
   sequence = traverse identity
 
 instance Skolemize Mu Var TT where
-  skolemize (Scoped i s) k = replaceFree (\x -> if x == Ident i then Just (var (Skolemized i s k)) else Nothing) 
+  skolemize (Ident i) k = replaceFree (\x -> if x == Ident i then Just (var (Skolemized i k)) else Nothing) 
   -- TODO error if the Var is not Scoped
   skolemize _ _ = identity
 
@@ -240,16 +240,10 @@ instance Foldable TT where
   foldMap _ (TypeCon _ _) = mempty
 
 
-newtype Scope = Scope Int
-derive newtype instance Show Scope
-derive newtype instance Ord Scope
-derive newtype instance Eq Scope
-
 
 data Var =
     Ident Ident
-  | Scoped Ident Scope 
-  | Skolemized Ident Scope Skolem
+  | Skolemized Ident Skolem
 
 
 derive instance Generic Var _
@@ -262,13 +256,11 @@ instance Eq Var where
 
 instance Pretty Var where
   pretty (Ident i) = pretty i
-  pretty (Scoped i s) = pretty i <> text (":" <> show s)
-  pretty (Skolemized i s k) = pretty i <> text (":" <> show s) <> text (":" <>show k)
+  pretty (Skolemized i k) = pretty i <> text (":" <>show k)
 
 instance Shadow Var where
   shadow (Ident i) = Ident i
-  shadow (Scoped i _) = Ident i
-  shadow (Skolemized i _ _) = Ident i
+  shadow (Skolemized i _) = Ident i 
 
 instance PrettyVar Var where
   prettyVar = pretty
@@ -295,8 +287,7 @@ isTypeIdent _ = false
 
 isTypeVar :: Var -> Boolean
 isTypeVar (Ident i) = isTypeIdent i
-isTypeVar (Scoped i _) = isTypeIdent i
-isTypeVar (Skolemized i _ _) = isTypeIdent i
+isTypeVar (Skolemized i _) = isTypeIdent i
 
 instance PrettyLambda Void Var TT where
   prettyAbs v _ = absurd v
@@ -379,7 +370,8 @@ instance
   , InfiniteTypeError Var Term m
   , Fresh Var m
   , Skolemize Mu Var TT
-  , MonadState (TypingContext Var Mu Var TT) m
+  , MonadState (TypingContext Mu Var TT) m
+  , Reasoning Mu Var Var TT m
   , Monad m
   , NotInScopeError Var m
   ) => Unify Var Term m where
@@ -388,27 +380,19 @@ instance
     case project t of
       Var (Ident j) | i == j -> pure unit
       _ -> substitute v t
-  unify v@(Skolemized _ _ i) t' = do
+  unify v@(Skolemized _ i) t' = do
     t <- rewrite t'
     case project t of
-      Var (Skolemized _ _ j) | i == j -> pure unit
-      Var (Skolemized _ _ _) -> unificationError (var v) t
-      -- TODO is substitution always safe?                             
-      _ -> substitute v t
---      _ -> throwError $ unificationError (var v) t
-  unify v@(Scoped _ _) t' = do
-    t <- rewrite t'
-    case project t of
-      Var x@(Scoped _ _) | v == x -> pure unit
-      -- TODO is substitution always safe?
+      Var (Skolemized _ j) | i == j -> pure unit
       _ -> substitute v t
 
 
 instance
   ( Fresh Var m
   , Skolemize Mu Var TT
-  , MonadState (TypingContext Var Mu Var TT) m
+  , MonadState (TypingContext Mu Var TT) m
   , Monad m
+  , Reasoning Mu Var Var TT m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
   , NotInScopeError Var m
@@ -435,10 +419,11 @@ instance
 instance
   ( Monad m
   , Unify Term Term m
-  , MonadState (TypingContext Var Mu Var TT) m
+  , MonadState (TypingContext Mu Var TT) m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
   , NotInScopeError Var m
+  , Reasoning Mu Var Var TT m
   ) => Inference Var Var TT Term m where
   inference Arrow = pure $ (arrow (cat (Star 1)) (arrow (cat (Star 1)) (cat (Star 1))) :< Cat Arrow)
   inference (Star i) = pure $ (cat (Star (i+1)) :< Cat (Star i))
@@ -511,7 +496,7 @@ instance
       Nothing -> notInScopeError (Ident $ TermVar c) -- TODO use correct error
       Just (DataValueDecl _ ts) -> do
          let dataType = appMany (cat (Data (DataConstructor tycon Nothing))) (var <$> tyvars)
-         ty <- renameFresh (arrMany ts dataType)
+         ty <- closeTerm <$> renameFresh (arrMany ts dataType)
          pure (ty :< Cat (DataCon c dt)) 
   inference (TypeCon c dt@(DataType (DataTypeDecl tycon tyvars) cs)) = do
      -- TODO infer the kind - this ain't right
@@ -523,7 +508,7 @@ instance
 instance
   ( Monad m
   , Unify Term Term m
-  , MonadState (TypingContext Var Mu Var TT) m
+  , MonadState (TypingContext Mu Var TT) m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
   , NotInScopeError Var m
@@ -533,7 +518,7 @@ instance
       Cat (Native (Purescript na)) /\ Cat (TypeLit t) -> do
         case closeTerm $ na.nativeType of
           In (Abs tv tb) -> do
-            let tb' = replace (\v -> if shadow v == shadow tv then Just t else Nothing) tb
+            let tb' = replace (\v -> if v == shadow tv then Just t else Nothing) tb
             pure $ tb' :< Cat (Native (Purescript (na { nativeType = tb' })))
           _ -> pure $ ty :< tail a
       Cat (Native (Purescript na)) /\ Cat (Native (Purescript nb)) -> do
@@ -561,11 +546,12 @@ instance
 instance
   ( Monad m
   , Unify Term Term m
-  , MonadState (TypingContext Var Mu Var TT) m
+  , MonadState (TypingContext Mu Var TT) m
   , ThrowRecursiveModuleError Mu Var TT m
   , NotInScopeError Var m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
+  , Reasoning Mu Var Var TT m
   ) => Reduction Mu Var TT m where
   reduction l t =
     case l of

@@ -9,33 +9,35 @@ import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class FreeVars, class Shadow, LambdaF(..), TermF, absMany, app, cat, free, shadow, var)
+import Language.Lambda.Judgement (class Reasoning, inferred)
 import Language.Lambda.Unification (class Context, class Fresh, class Rewrite, class Unify, assume, fresh, require, rewrite, unify)
 import Matryoshka.Algebra (Algebra)
-import Matryoshka.Class.Corecursive (class Corecursive, embed)
+import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
 import Matryoshka.Fold (cata)
 
-infer :: forall exp abs var cat m typ .
+infer :: forall exp abs var cat m f .
         Monad m
-     => IsTypeApp abs var cat typ
-     => AbsRule abs var cat typ m
+     => IsTypeApp abs var cat (f (LambdaF var var cat))
+     => AbsRule abs var cat (f (LambdaF var var cat)) m
      => Functor cat
      => Recursive exp (LambdaF abs var cat)
-     => Fresh typ m
-     => Context var typ m
-     => Rewrite typ m
-     => Unify typ typ m
-     => Recursive typ (TermF var cat)
-     => Corecursive typ (TermF var cat)
-     => Arrow typ
+     => Fresh (f (LambdaF var var cat)) m
+     => Context var (f (LambdaF var var cat)) m
+     => Rewrite (f (LambdaF var var cat)) m
+     => Unify (f (LambdaF var var cat)) (f (LambdaF var var cat)) m
+     => Recursive (f (LambdaF var var cat)) (TermF var cat)
+     => Corecursive (f (LambdaF var var cat)) (TermF var cat)
+     => Arrow (f (LambdaF var var cat))
      => Shadow var
-     => Inference abs var cat typ m
+     => Inference abs var cat (f (LambdaF var var cat)) m
      => Ord var
      => Foldable cat
      => FreeVars var var cat
-     => exp -> (m (Cofree (LambdaF abs var cat) typ)) 
+     => Reasoning f abs var cat m
+     => exp -> (m (Cofree (LambdaF abs var cat) (f (LambdaF var var cat)))) 
 infer exp = do
-  u <- cata rule exp
+  u <- cata (\x -> rule x >>= (\t -> inferred t *> pure t)) exp
   let q :: List var
       q = free (head u)
   pure (absMany q (head u) :< tail u)
@@ -72,7 +74,7 @@ rule :: forall abs var cat m typ .
      => Foldable cat
      => FreeVars var var cat
      => Algebra (LambdaF abs var cat) (m (Cofree (LambdaF abs var cat) typ)) 
-rule expr = 
+rule expr = do
   case expr of
     Abs b a -> absRule b a  
     App f a -> join $ appRule <$> f <*> a
@@ -170,14 +172,6 @@ unifyWithArrow t = do
    retTy <- fresh
    _ <- unify (argTy' :->: retTy) t     
    Tuple <$> rewrite argTy' <*> rewrite retTy
-
-flat :: forall exp typ abs var cat.
-        Functor cat
-     => Recursive exp (LambdaF abs var cat)
-     => Corecursive exp (LambdaF abs var cat)
-     => Cofree (LambdaF abs var cat) typ 
-     -> exp 
-flat c = embed (flat <$> tail c)
 
 
 ----

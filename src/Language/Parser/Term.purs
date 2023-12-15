@@ -4,7 +4,6 @@ module Language.Parser.Term where
 import Prelude
 
 import Control.Alt ((<|>))
-import Control.Comonad.Cofree (head, (:<))
 import Control.Lazy (defer)
 import Control.Monad.Cont (lift)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
@@ -16,7 +15,7 @@ import Data.Foldable (foldl)
 import Data.Functor.Mu (Mu)
 import Data.Homogeneous (class ToHomogeneousRow)
 import Data.Homogeneous.Record (fromHomogeneous, homogeneous)
-import Data.List (List(..), length, (..), (:))
+import Data.List (List(..), (..), (:))
 import Data.List as List
 import Data.List.NonEmpty (NonEmptyList)
 import Data.List.NonEmpty as NonEmptyList
@@ -24,26 +23,23 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..), maybe)
 import Data.String (codePointFromChar)
 import Data.String.CodeUnits (fromCharArray, toCharArray)
-import Data.Traversable (sequence, traverse)
-import Data.Tuple (Tuple(..), fst, uncurry)
+import Data.Tuple (fst, uncurry)
 import Data.Tuple.Nested ((/\))
-import Debug (traceM)
 import Effect (Effect)
 import Language.Kernel.Data (Data(..))
 import Language.Kernel.Prim (primNatives)
-import Language.Lambda.Calculus (LambdaF(..), absMany, app, appMany, cat, var)
-import Language.Lambda.Inference (appRule, arrMany, closeTerm, flat, infer, (:->:))
+import Language.Lambda.Calculus (LambdaF, absMany, app, cat, var)
 import Language.Lambda.Module (Module(..))
-import Language.Lambda.Unification (class Fresh, class InfiniteTypeError, class NotInScopeError, TypingContext, fresh, renameFresh, rewrite)
+import Language.Lambda.Unification (class Fresh, class InfiniteTypeError, class NotInScopeError, TypingContext)
 import Language.Lambda.Unification.Error (class ThrowUnificationError)
-import Language.Native (Native(..), native)
+import Language.Native (Native, native)
 import Language.Native.Module (Listing, NativeModule, moduleListing)
 import Language.Native.Reify (nativeTerm, reify)
 import Language.Native.Unsafe (unsafeModule)
 import Language.Parser.Basis (class StringParserT, class BasisParser)
 import Language.Parser.Common (buildPostfixParser, languageDef)
 import Language.Parser.Indent (IndentParserT, Positioned, block1, indented, runIndentT, withPos, withPos')
-import Language.Term (CaseAlternative(..), DataType(..), DataTypeDecl(..), DataValueDecl(..), Ident(..), Scope(..), TT(..), Term, TypedTerm, Var(..), freshTermVar)
+import Language.Term (CaseAlternative(..), DataType(..), DataTypeDecl(..), DataValueDecl(..), Ident(..), TT(..), Term, Var(..))
 import Parsing (fail, runParserT)
 import Parsing.Combinators (choice, many, many1, many1Till, try)
 import Parsing.Expr (buildExprParser)
@@ -52,11 +48,10 @@ import Parsing.Token (GenTokenParser, makeTokenParser)
 import Prettier.Printer (beside, text, (<+>))
 import Pretty.Printer (pretty, prettyPrint)
 import Type.Proxy (Proxy(..))
-import Unsafe.Coerce (unsafeCoerce)
 
 instance
   ( Fresh Int m
-  , MonadState (TypingContext Var Mu Var TT) m
+  , MonadState (TypingContext Mu Var TT) m
   , ThrowUnificationError Term m
   , InfiniteTypeError Var Term m
   , NotInScopeError Var m
@@ -91,7 +86,7 @@ data Decl =
 
 dataConstructors :: forall m.
                     MonadRec m
-                 => MonadState (TypingContext Var Mu Var TT) m
+                 => MonadState (TypingContext Mu Var TT) m
                  => ThrowUnificationError Term m
                  => InfiniteTypeError Var Term m
                  => NotInScopeError Var m
@@ -117,7 +112,7 @@ parser :: forall names row m.
        => ThrowUnificationError Term m
        => InfiniteTypeError Var Term m
        => NotInScopeError Var m
-       => MonadState (TypingContext Var Mu Var TT) m
+       => MonadState (TypingContext Mu Var TT) m
        => ToHomogeneousRow names (IndentParserT m (Native Term)) row
        => NativeModule names (IndentParserT m (Native Term))
        -> TermParser m
@@ -379,8 +374,7 @@ parser mod = {
         parsePats = reservedOp "forall" *> many1Till scopedVar (reservedOp ".")
         scopedVar = do
           i <- identifier
-          s <- lift $ lift fresh
-          pure $ Scoped (TypeVar i) (Scope s)
+          pure $ Ident (TypeVar i) 
     
     parseTypeApp :: Term -> IndentParserT m Term
     parseTypeApp v = app v <$> parseTypeAtom

@@ -322,4 +322,12 @@ cat :: forall lam abs var cat .
     => cat lam -> lam 
 cat = embed <<< Cat
 
+flat :: forall exp typ abs var cat.
+        Functor cat
+     => Recursive exp (LambdaF abs var cat)
+     => Corecursive exp (LambdaF abs var cat)
+     => Cofree (LambdaF abs var cat) typ 
+     -> exp 
+flat c = embed (flat <$> tail c)
+
 

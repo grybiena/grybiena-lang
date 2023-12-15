@@ -3,20 +3,23 @@ module Language.Lambda.Unification where
 import Prelude
 
 import Control.Monad.Except (ExceptT, runExceptT)
-import Control.Monad.State (class MonadState, State, StateT, get, modify, modify_, runState, runStateT)
+import Control.Monad.RWS (RWSResult, RWST, runRWST)
+import Control.Monad.State (class MonadState, get, modify, modify_)
 import Data.Either (Either)
 import Data.Foldable (class Foldable)
-import Data.List (fromFoldable)
+import Data.List (List, fromFoldable)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Set as Set
 import Data.Traversable (class Traversable, traverse)
-import Data.Tuple.Nested (type (/\), (/\))
+import Data.Tuple.Nested ((/\))
 import Language.Lambda.Calculus (class AllVars, class Shadow, LambdaF(..), TermF, occursIn, replace, replaceFree, shadow, universe, var)
+import Language.Lambda.Judgement (class Reasoning, Judgement, assumeHasType, makeSubstitution, unifyTerms)
 import Language.Lambda.Unification.Error (class ThrowUnificationError, unificationError)
 import Matryoshka.Class.Corecursive (class Corecursive)
 import Matryoshka.Class.Recursive (class Recursive, project)
+
 
 class Enumerable k where
   fromInt :: Int -> k
@@ -79,8 +82,10 @@ instance
   , Unify var (f (TermF var cat)) m
   , ThrowUnificationError (f (TermF var cat)) m
   , Skolemize f var cat
+  , Reasoning f var var cat m 
   ) => Unify (f (TermF var cat)) (f (TermF var cat)) m where
   unify ta tb = do
+     unifyTerms ta tb
      case project ta /\ project tb of
        Var v /\ _ -> unify v tb
        _ /\ Var v -> unify v ta 
@@ -100,31 +105,33 @@ instance
        _ -> unificationError ta tb
 
 
-type TypingContext var f var' cat' =
+type TypingContext f var cat =
   { nextVar :: Int
-  , typingAssumptions :: Map var (f (TermF var' cat')) 
-  , currentSubstitution :: Map var' (f (TermF var' cat'))
+  , typingAssumptions :: Map var (f (TermF var cat)) 
+  , currentSubstitution :: Map var (f (TermF var cat))
   }
 
 
-runUnificationT :: forall var f var' cat' err a m.
-                  ExceptT err (StateT (TypingContext var f var' cat') m) a
-               ->  m (Either err a /\ TypingContext var f var' cat')
-runUnificationT = flip runStateT { nextVar: 0
+runUnificationT :: forall m err a f var cat.
+  ExceptT err
+    (RWST Unit (List (Judgement f var var cat))
+       (TypingContext f var cat) 
+       m
+    )
+    a
+  -> m
+       (RWSResult
+          (TypingContext f var cat) 
+          (Either err a)
+          (List (Judgement f var var cat))
+       )
+runUnificationT f = runRWST (runExceptT f) unit { nextVar: 0
                                , typingAssumptions: Map.empty
                                , currentSubstitution: Map.empty
-                               } <<< runExceptT
+                               }
 
 
-runUnification :: forall var f var' cat' err a.
-                  ExceptT err (State (TypingContext var f var' cat')) a
-               -> Either err a /\ TypingContext var f var' cat'
-runUnification = flip runState { nextVar: 0
-                               , typingAssumptions: Map.empty
-                               , currentSubstitution: Map.empty
-                               } <<< runExceptT
-
-instance MonadState (TypingContext var f var' cat') m => Fresh Int m where
+instance MonadState (TypingContext f var cat) m => Fresh Int m where
   fresh = do
     st <- modify (\st -> st {
       nextVar = st.nextVar + 1
@@ -132,17 +139,17 @@ instance MonadState (TypingContext var f var' cat') m => Fresh Int m where
     pure st.nextVar
 else
 instance
-  ( MonadState (TypingContext var f var' cat') m 
-  , Enumerable var'
-  , Corecursive (f (TermF var' cat')) (TermF var' cat')
-  ) => Fresh (f (TermF var' cat')) m where
+  ( MonadState (TypingContext f var cat) m 
+  , Enumerable var
+  , Corecursive (f (TermF var cat)) (TermF var cat)
+  ) => Fresh (f (TermF var cat)) m where
   fresh = var <<< fromInt <$> fresh
 else
 instance
   ( Monad m
   , Fresh Int m
-  , Enumerable var'
-  ) => Fresh var' m where
+  , Enumerable var
+  ) => Fresh var m where
   fresh = fromInt <$> fresh
 
 
@@ -151,9 +158,11 @@ instance
   ( Monad m
   , Ord var
   , NotInScopeError var m
-  , MonadState (TypingContext var f var' cat') m
-  ) => Context var (f (TermF var' cat')) m where
-  assume v t =
+  , MonadState (TypingContext f var cat) m
+  , Reasoning f var var cat m
+  ) => Context var (f (TermF var cat)) m where
+  assume v t = do
+     assumeHasType v t
      modify_ (\st -> st {
        typingAssumptions = Map.insert v t st.typingAssumptions
        })
@@ -165,35 +174,36 @@ instance
 
 
 instance
-  ( Ord var'
-  , Shadow var'
-  , Traversable cat'
-  , Fresh var' m
-  , Skolemize f var' cat'
-  , MonadState (TypingContext var f var' cat') m
-  , Recursive (f (TermF var' cat')) (TermF var' cat')
-  , Corecursive (f (TermF var' cat')) (TermF var' cat')
+  ( Ord var
+  , Shadow var
+  , Traversable cat
+  , Fresh var m
+  , Skolemize f var cat
+  , MonadState (TypingContext f var cat) m
+  , Recursive (f (TermF var cat)) (TermF var cat)
+  , Corecursive (f (TermF var cat)) (TermF var cat)
 
-  , Unify (cat' (f (TermF var' cat'))) (cat' (f (TermF var' cat'))) m
-  , Unify var' (f (TermF var' cat')) m
-  , ThrowUnificationError (f (TermF var' cat')) m 
-  , InfiniteTypeError var' (f (TermF var' cat')) m
-  , AllVars var' var' cat' 
-  , Shadow var' -- TODO is it safe to only consider shadows?
-  ) => Substitute var' cat' f m where
+  , Unify (cat (f (TermF var cat))) (cat (f (TermF var cat))) m
+  , Unify var (f (TermF var cat)) m
+  , ThrowUnificationError (f (TermF var cat)) m 
+  , InfiniteTypeError var (f (TermF var cat)) m
+  , AllVars var var cat 
+  , Reasoning f var var cat m 
+  ) => Substitute var cat f m where
   substitute v t = do 
+     makeSubstitution v t
      when (v `occursIn` t) $ infiniteTypeError v t 
-     u <- rewrite (var v :: f (TermF var' cat'))
+     u <- rewrite (var v :: f (TermF var cat))
      case project u of
         Var v' | v' == v -> pure unit 
         _ -> void $ unify u t
      let subNew = replaceFree (\x -> if x == v then Just t else Nothing)
      modify_ (\st -> st {
-                currentSubstitution = Map.insert (shadow v) t (subNew <$> st.currentSubstitution)
+                currentSubstitution = Map.insert v t (subNew <$> st.currentSubstitution)
               })
   substitution = do
     st <- get
-    pure $ flip Map.lookup st.currentSubstitution <<< shadow
+    pure $ flip Map.lookup st.currentSubstitution
 
 -- | Rename all of the bindings and variables with fresh ones
 -- without incurring any substitutions (the new variables will be unique to the term)
