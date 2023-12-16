@@ -7,11 +7,12 @@ import Control.Comonad.Env (EnvT(..), runEnvT)
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..), snd)
 import Data.Tuple.Nested (type (/\), (/\))
+import Language.Category.Application (class Application)
 import Language.Category.Elimination (class Elimination)
 import Language.Category.Inference (class Inference)
 import Language.Functor.Abs (Abs(..))
 import Language.Functor.Coproduct (class Inject, type (:+:), Coproduct(..), inj, prj)
-import Language.Functor.Opaque (Opaque(..), Opaque(..))
+import Language.Functor.Opaque (Opaque(..))
 import Language.Functor.Var (Var(..))
 import Language.Lambda.Inference (class Arrow, unifyWithArrow)
 import Language.Lambda.Unification (class Fresh, class Rewrite, class Unify, rewrite, unify)
@@ -22,6 +23,10 @@ newtype Lit lit a = Lit lit
 
 
 newtype App a = App (a /\ a)
+
+instance Application App where
+  app f g = App (f /\ g)
+  unApp (App a) = a
 
 instance
   ( Monad m
