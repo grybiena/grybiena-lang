@@ -9,6 +9,7 @@
         ordered-collections
         parsing
         prettier-printer
+        profunctor-lenses
 
         debug
       ];
