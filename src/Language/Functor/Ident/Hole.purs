@@ -9,7 +9,7 @@ import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
 import Language.Category.Elimination (class Elimination)
 import Language.Category.Inference (class Inference)
-import Language.Functor.Coproduct (class Inject, inj)
+import Language.Functor.Coproduct (class Inject, type (:+:), inj)
 import Language.Functor.Ident.Var (class Fresh, Var, fresh)
 import Language.Functor.Parse (class Parse)
 import Language.Functor.Type.Universe (Universe)
@@ -44,7 +44,7 @@ instance
   ( Monad m
   , Fresh m
   , Inject Var typ
-  ) => Elimination Hole typ (Universe typ) m where
+  ) => Elimination Hole typ (Universe (Hole :+: typ)) m where
     elimination Hole t = do
        v <- fresh
        pure $ t :< inj v

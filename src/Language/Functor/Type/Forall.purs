@@ -2,7 +2,7 @@ module Language.Functor.Type.Forall where
 
 import Prelude
 
-import Control.Comonad.Cofree (Cofree, (:<))
+import Control.Comonad.Cofree (Cofree, head, (:<))
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu)
 import Data.Traversable (class Traversable, traverse)
@@ -44,7 +44,8 @@ instance
   ) => Inference Forall cat (Universe typ) m where
     inference (Forall (Var v /\ inferBody)) = do 
       assume (Var v) (hole :: Universe typ) 
-      inferBody
+      bod <- inferBody      
+      pure (head bod :< inj (Forall (Var v /\ bod)))
 
 instance 
   ( Monad m
@@ -66,7 +67,7 @@ instance
      (c :: cat (f cat)) <- parse 
      pure (Forall (v /\ embed c))
 
-type Foo = (Forall :+: Var :+: Hole)
+type Foo = (Hole :+: Forall :+: Var)
 
 
 parso :: forall m.
@@ -81,6 +82,8 @@ infero :: forall m.
        => Mu Foo -> m (Cofree Foo (Universe Foo))
 infero = infer
 
-reduco :: forall m. Monad m => Fresh m => Cofree Foo (Universe Foo) -> m (Cofree Foo (Universe Foo))
+type Bar = Forall :+: Var
+
+reduco :: forall m. Monad m => Fresh m => Cofree Foo (Universe Foo) -> m (Cofree Bar (Universe Foo))
 reduco = reduce
 
