@@ -1,4 +1,4 @@
-module Language.Functor.Opaque where
+module Language.Functor.Value.Opaque where
 
 import Prelude
 

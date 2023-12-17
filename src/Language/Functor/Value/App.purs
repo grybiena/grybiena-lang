@@ -1,25 +1,28 @@
-module Language.Functor.App where
+module Language.Functor.Value.App where
 
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Comonad.Env (EnvT(..), runEnvT)
+import Data.Functor.Mu (Mu)
 import Data.Maybe (Maybe(..))
-import Data.Tuple (Tuple(..), snd)
+import Data.Traversable (class Traversable)
+import Data.Tuple (snd)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Category.Application (class Application)
 import Language.Category.Elimination (class Elimination)
 import Language.Category.Inference (class Inference)
-import Language.Functor.Abs (Abs(..))
+import Language.Category.Reduction (reduce)
 import Language.Functor.Coproduct (class Inject, type (:+:), Coproduct(..), inj, prj)
-import Language.Functor.Opaque (Opaque(..))
-import Language.Functor.Var (Var(..))
+import Language.Functor.Type.App as Type
+import Language.Functor.Type.Lit (Lit(..))
+import Language.Functor.Type.Universe (Universe)
+import Language.Functor.Value.Abs (Abs)
+import Language.Functor.Value.Opaque (Opaque(..))
+import Language.Functor.Value.Var (Var)
 import Language.Lambda.Inference (class Arrow, unifyWithArrow)
 import Language.Lambda.Unification (class Fresh, class Rewrite, class Unify, rewrite, unify)
 import Matryoshka (class Corecursive, class Recursive, embed, project)
-
-newtype Lit :: forall k. Type -> k -> Type
-newtype Lit lit a = Lit lit 
 
 
 newtype App a = App (a /\ a)
@@ -30,26 +33,35 @@ instance Application App where
 
 instance
   ( Monad m
-  , Recursive typ tt
-  , Corecursive typ tt
-  , Fresh typ m
-  , Rewrite typ m
-  , Arrow typ 
-  , Unify typ typ m
+  , Recursive (Universe typ) tt
+  , Corecursive (Universe typ) tt
+  , Fresh (Universe typ) m
+  , Rewrite (Universe typ) m
+  , Arrow (Universe typ) 
+  , Unify (Universe typ) (Universe typ) m
   , Inject (Var var) tt
-  , Inject (Abs var) tt
+  , Inject (Abs App var) tt
   , Inject App cat 
-  , Inject (Lit typ) cat
-  ) => Inference App cat typ m where
+  , Inject Type.App tt
+  , Inject (Lit (Universe typ)) cat
+  , Elimination typ typ (Mu (Cofree typ)) m
+  , Traversable typ
+  ) => Inference App cat (Universe typ) m where
     inference (App (inferF /\ inferA)) = do 
       f <- inferF
       a <- inferA
-      case Tuple <$> prj (project (head f)) <*> prj (tail a) of
-        Just (Abs ((v :: var) /\ b) /\ Lit (argLit :: typ)) -> do
-          _ <- unify (embed (inj (Var v)) :: typ) argLit
-          tyApp <- rewrite b
-          pure $ tyApp :< tail f
+      case prj (tail a) of
+        Just (Lit t) -> do
+          z <- reduce (embed (inj (Type.App (head f /\ t))) :: Universe typ) 
+          pure $ z :< tail f
         Nothing -> do
+
+--      case Tuple <$> prj (project (head f)) <*> prj (tail a) of
+--        Just ((Abs (v /\ b) :: Abs App var _) /\ (Lit (argLit :: typ))) -> do
+--          _ <- unify (embed (inj (Var v)) :: typ) argLit
+--          tyApp <- rewrite b
+--          pure $ tyApp :< tail f
+--        Nothing -> do
           arrArg /\ arrRet <- unifyWithArrow (head f)
           void $ unify arrArg (head a)
           arrRet' <- rewrite arrRet

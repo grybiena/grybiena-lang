@@ -6,7 +6,6 @@ import Control.Comonad.Cofree (Cofree)
 import Control.Comonad.Env (EnvT, runEnvT)
 import Data.Traversable (class Traversable)
 import Data.Tuple (uncurry)
-import Language.Functor.Coproduct (type (:+:), Coproduct(..))
 import Matryoshka (class Recursive, cata, cataM, embed, project)
 import Language.Category.Elimination (class Elimination, elimination)
 import Language.Category.Inference (class Inference, inference)
@@ -34,12 +33,12 @@ instance
   ) => Reduction (EnvT typ obj) (Cofree cat typ) (Cofree cat typ) (EnvT typ cat) m where
     reduction e = project <$> uncurry (flip elimination) (runEnvT e)
 
-eliminate :: forall obj cat typ m.
-             Elimination obj cat typ m
-          => Monad m
-          => Traversable obj 
-          => Functor cat
-          => Cofree obj typ -> m (Cofree cat typ) 
-eliminate = cataM (map embed <<< reduction) 
+reduce :: forall obj cat typ m.
+          Elimination obj cat typ m
+       => Monad m
+       => Traversable obj 
+       => Functor cat
+       => Cofree obj typ -> m (Cofree cat typ) 
+reduce = cataM (map embed <<< reduction) 
 
 

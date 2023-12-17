@@ -1,4 +1,4 @@
-module Language.Functor.Var where
+module Language.Functor.Value.Var where
 
 import Prelude
 

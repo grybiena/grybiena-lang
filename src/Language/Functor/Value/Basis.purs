@@ -1,11 +1,11 @@
-module Language.Functor.Basis where
+module Language.Functor.Value.Basis where
 
 import Prelude
 
 import Control.Comonad.Cofree ((:<))
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
-import Language.Functor.Opaque (Opaque(..))
+import Language.Functor.Value.Opaque (Opaque(..))
 import Language.Functor.Coproduct (class Inject, inj)
 import Unsafe.Coerce (unsafeCoerce)
 import Language.Category.Elimination (class Elimination)

@@ -1,0 +1,34 @@
+module Language.Functor.Type.Level where
+
+import Prelude
+
+import Control.Comonad.Cofree (deferCofree, (:<))
+import Data.Functor.Mu (Mu(..))
+import Data.Generic.Rep (class Generic)
+import Data.Show.Generic (genericShow)
+import Data.Tuple.Nested ((/\))
+import Language.Category.Inference (class Inference)
+import Language.Functor.Coproduct (class Inject, inj)
+import Language.Functor.Type.Universe (Universe)
+
+newtype Level :: forall k. k -> Type
+newtype Level a = Level Int
+
+derive instance Generic (Level a) _
+
+instance Show (Level a) where
+  show = genericShow
+
+instance Functor Level where
+  map _ (Level i) = Level i
+
+instance
+  ( Monad m 
+  , Inject Level typ 
+  ) => Inference Level typ (Universe typ) m where
+    inference (Level i) = pure $ (toInfinity (i+1)) :< inj (Level i) 
+
+toInfinity :: forall typ. Inject Level typ => Int -> Universe typ 
+toInfinity i = deferCofree (\_ -> (In (toInfinity (i+1)) /\ inj (Level i)))
+
+ 
