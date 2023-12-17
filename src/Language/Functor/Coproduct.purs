@@ -2,16 +2,7 @@ module Language.Functor.Coproduct where
 
 import Prelude
 
-import Control.Comonad.Cofree (Cofree)
 import Data.Maybe (Maybe(..))
-import Language.Lambda.Calculus (TermF)
-
---class Reduction obj f var cat m where
---  reduction :: obj (Cofree (TermF var cat) (f (TermF var cat)))
---            -> (f (TermF var cat))
---            -> m (Cofree (TermF var cat) (f (TermF var cat)))
-
-
 
 data Coproduct :: (Type -> Type) -> (Type -> Type) -> Type -> Type
 data Coproduct f g a = Inl (f a) | Inr (g a)

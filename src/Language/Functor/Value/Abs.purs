@@ -6,32 +6,35 @@ import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Category.Application (class Application, app, unApp)
+import Language.Category.Arrow (class Arrow, (:=>:))
+import Language.Category.Context (class Context, assume)
 import Language.Category.Elimination (class Elimination)
+import Language.Category.Fresh (class Fresh, fresh)
 import Language.Category.Inference (class Inference, inference)
+import Language.Category.Rewrite (class Rewrite, rewrite)
 import Language.Functor.Coproduct (class Inject, inj, prj)
+import Language.Functor.Ident.Var (Var(..))
 import Language.Functor.Value.Basis (Basis(..))
-import Language.Functor.Value.Var (Var(..))
-import Language.Lambda.Inference (class Arrow, (:->:))
-import Language.Lambda.Unification (class Context, class Fresh, class Rewrite, assume, fresh, rewrite)
 
 
-newtype Abs :: forall k. k -> Type -> Type -> Type
-newtype Abs app var a = Abs (var /\ a)
+
+newtype Abs :: forall k. k -> Type -> Type
+newtype Abs app a = Abs (Var a /\ a)
 
 instance
   ( Monad m
-  , Context var typ m
+  , Context Var typ m
   , Fresh typ m
   , Rewrite typ m
   , Arrow typ
-  , Inject (Abs app var) cat 
-  ) => Inference (Abs app var) cat typ m where
-    inference (Abs (binding /\ inferBody)) = do 
+  , Inject (Abs app) cat 
+  ) => Inference (Abs app) cat typ m where
+    inference (Abs (Var v /\ inferBody)) = do 
       tyBind <- fresh
-      assume binding tyBind
+      assume (Var v) tyBind
       tyBody <- inferBody
       argTy <- rewrite tyBind 
-      pure $ (argTy :->: (head tyBody)) :< inj (Abs (binding /\ tyBody) :: Abs app var _)
+      pure $ (argTy :=>: (head tyBody)) :< inj (Abs (Var v /\ tyBody) :: Abs app _)
 
 class FreeIn var cat typ where
   freeIn :: var -> Cofree cat typ -> Boolean
@@ -39,26 +42,26 @@ class FreeIn var cat typ where
 instance
   ( Monad m
   , Functor cat
-  , Inject (Var var) cat
+  , Inject Var cat
   , Inject Basis cat
   , Inject app cat
-  , Inject (Abs app var) cat
+  , Inject (Abs app) cat
   , Application app
   , Inference Basis cat typ m
   , Inference app cat typ m
-  , FreeIn var cat typ
+  , FreeIn (Var (Cofree cat typ)) cat typ
   , Eq var
-  ) => Elimination (Abs app var) cat typ m where
+  ) => Elimination (Abs app) cat typ m where
     elimination (Abs (a /\ x)) t = do
       case prj (tail x) of
-        Just (Var v) | v == a -> pure $ t :< inj I 
-        Just (Var _) -> do
+        Just v | v == a -> pure $ t :< inj I 
+        Just _ -> do
           k <- inference K  
           pure $ t :< inj (app k x :: app (Cofree cat typ))
         Nothing ->
           case prj (tail x) of
-            Just (Abs ((_ :: var) /\ f) :: Abs app var _) | a `freeIn` f ->
-              pure $ t :< inj (Abs (a /\ x) :: Abs app var _)
+            Just (Abs (_ /\ f) :: Abs app _) | a `freeIn` f ->
+              pure $ t :< inj (Abs (a /\ x) :: Abs app _)
             Just _ -> do
               k <- inference K
               pure $ t :< inj (app k x :: app (Cofree cat typ))
@@ -77,10 +80,10 @@ instance
                       pure $ t :< inj (app b e2 :: app (Cofree cat typ))                    
                     _ -> do 
                       if a `freeIn` x
-                        then pure $ t :< inj (Abs (a /\ x) :: Abs app var _)
+                        then pure $ t :< inj (Abs (a /\ x) :: Abs app _)
                         else do
                           k <- inference K
                           pure $ t :< inj (app k x :: app (Cofree cat typ))
-                Nothing -> pure $ t :< inj (Abs (a /\ x) :: Abs app var _)
+                Nothing -> pure $ t :< inj (Abs (a /\ x) :: Abs app _)
  
 

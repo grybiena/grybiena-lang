@@ -19,7 +19,7 @@ import Language.Functor.Type.Lit (Lit(..))
 import Language.Functor.Type.Universe (Universe)
 import Language.Functor.Value.Abs (Abs)
 import Language.Functor.Value.Opaque (Opaque(..))
-import Language.Functor.Value.Var (Var)
+import Language.Functor.Ident.Var (Var)
 import Language.Lambda.Inference (class Arrow, unifyWithArrow)
 import Language.Lambda.Unification (class Fresh, class Rewrite, class Unify, rewrite, unify)
 import Matryoshka (class Corecursive, class Recursive, embed, project)
@@ -39,8 +39,8 @@ instance
   , Rewrite (Universe typ) m
   , Arrow (Universe typ) 
   , Unify (Universe typ) (Universe typ) m
-  , Inject (Var var) tt
-  , Inject (Abs App var) tt
+  , Inject Var tt
+  , Inject (Abs App) tt
   , Inject App cat 
   , Inject Type.App tt
   , Inject (Lit (Universe typ)) cat
