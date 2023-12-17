@@ -3,8 +3,9 @@ module Language.Functor.Parse where
 import Prelude
 
 import Control.Alt (class Alt, (<|>))
-import Data.Functor.Mu (Mu)
-import Language.Functor.Coproduct (class Inject, type (:+:), Coproduct(..), inj)
+import Data.Functor.Coproduct.Inject (inj)
+import Data.Functor.Mu (Mu, transMu)
+import Language.Functor.Coproduct (type (:+:), Coproduct(..))
 import Language.Parser (class LanguageParser, try)
 import Matryoshka (embed)
 
@@ -22,14 +23,12 @@ instance
    parse = try (Inl <$> parse) <|> (Inr <$> parse)
 
 instance
-  ( LanguageParser m
-  , Monad m
-  , Parse obj (cat :+: obj) Mu m 
-  , Functor cat
+  ( Monad m
+  , Parse obj cat Mu m 
   , Functor obj
-  , Inject obj (cat :+: obj)
-  ) => Parse Mu obj (Coproduct cat) m where 
-  parse = do
-    (v :: obj _) <- parse
-    pure $ embed (inj v)
+  , Functor cat
+  ) => Parse Mu cat (Coproduct obj) m where 
+  parse = embed <<< Inl <<< map (transMu Inr) <$> parse 
+
+
 

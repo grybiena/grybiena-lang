@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Control.Comonad.Env (EnvT(..), runEnvT)
-import Data.Functor.Mu (Mu)
+import Data.Functor.Mu (Mu(..))
 import Data.Maybe (Maybe(..))
 import Data.Traversable (class Traversable)
 import Data.Tuple (snd)
@@ -12,17 +12,15 @@ import Data.Tuple.Nested (type (/\), (/\))
 import Language.Category.Application (class Application)
 import Language.Category.Elimination (class Elimination)
 import Language.Category.Inference (class Inference)
-import Language.Category.Reduction (reduce)
+import Language.Category.Reduction (infer)
 import Language.Functor.Coproduct (class Inject, type (:+:), Coproduct(..), inj, prj)
 import Language.Functor.Type.App as Type
 import Language.Functor.Type.Lit (Lit(..))
 import Language.Functor.Type.Universe (Universe)
-import Language.Functor.Value.Abs (Abs)
 import Language.Functor.Value.Opaque (Opaque(..))
-import Language.Functor.Ident.Var (Var)
 import Language.Lambda.Inference (class Arrow, unifyWithArrow)
 import Language.Lambda.Unification (class Fresh, class Rewrite, class Unify, rewrite, unify)
-import Matryoshka (class Corecursive, class Recursive, embed, project)
+import Matryoshka (class Recursive, project)
 
 
 newtype App a = App (a /\ a)
@@ -33,27 +31,29 @@ instance Application App where
 
 instance
   ( Monad m
-  , Recursive (Universe typ) tt
-  , Corecursive (Universe typ) tt
+--  , Recursive (Universe typ) tt
+--  , Corecursive (Universe typ) tt
+  , Recursive (typ (Universe typ)) typ
   , Fresh (Universe typ) m
   , Rewrite (Universe typ) m
   , Arrow (Universe typ) 
   , Unify (Universe typ) (Universe typ) m
-  , Inject Var tt
-  , Inject (Abs App) tt
+--  , Inject Var tt
+--  , Inject (Abs App) tt
   , Inject App cat 
-  , Inject Type.App tt
+  , Inject Type.App typ
   , Inject (Lit (Universe typ)) cat
   , Elimination typ typ (Mu (Cofree typ)) m
   , Traversable typ
+  , Inference typ typ (Universe typ) m
   ) => Inference App cat (Universe typ) m where
     inference (App (inferF /\ inferA)) = do 
-      f <- inferF
+      (f :: Cofree cat (Universe typ)) <- inferF
       a <- inferA
       case prj (tail a) of
         Just (Lit t) -> do
-          z <- reduce (embed (inj (Type.App (head f /\ t))) :: Universe typ) 
-          pure $ z :< tail f
+          z <- infer ((inj (Type.App (head f /\ t))) :: typ (Universe typ))
+          pure $ In z :< tail f
         Nothing -> do
 
 --      case Tuple <$> prj (project (head f)) <*> prj (tail a) of

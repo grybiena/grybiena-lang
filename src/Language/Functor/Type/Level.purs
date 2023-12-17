@@ -29,6 +29,6 @@ instance
     inference (Level i) = pure $ (toInfinity (i+1)) :< inj (Level i) 
 
 toInfinity :: forall typ. Inject Level typ => Int -> Universe typ 
-toInfinity i = deferCofree (\_ -> (In (toInfinity (i+1)) /\ inj (Level i)))
+toInfinity i = In (deferCofree (\_ -> (toInfinity (i+1) /\ inj (Level i))))
 
  

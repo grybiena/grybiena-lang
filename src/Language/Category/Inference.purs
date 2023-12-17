@@ -16,3 +16,4 @@ instance
     inference (Inl a) = inference a
     inference (Inr b) = inference b
 
+
