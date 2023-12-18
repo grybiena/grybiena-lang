@@ -3,18 +3,19 @@ module Language.Category.Forall where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, (:<))
+import Control.Plus (class Plus, empty)
 import Data.Foldable (class Foldable)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Monad.Context (class Context, assume)
-import Language.Functor.Elimination (class Elimination)
-import Language.Functor.Inference (class Inference)
-import Language.Functor.Coproduct (class Inject, inj)
 import Language.Category.Hole (Hole, hole)
 import Language.Category.Var (Var(..))
-import Language.Functor.Parse (class Parse, parse)
+import Language.Functor.Coproduct (class Inject, inj)
+import Language.Functor.Elimination (class Elimination)
+import Language.Functor.Inference (class Inference)
+import Language.Functor.Parse (class Parse, class Postfix, parse)
 import Language.Functor.Universe (Universe)
+import Language.Monad.Context (class Context, assume)
 import Language.Monad.Parser (class Parser, reserved, reservedOp)
 import Matryoshka (class Corecursive, embed)
 
@@ -54,6 +55,11 @@ instance
   , Inject Forall cat
   ) => Elimination Forall cat typ m where
     elimination v t = pure (t :< inj v)
+
+instance
+  ( Plus p
+  ) => Postfix p Forall cat f m where
+  postfix = pure empty
 
 instance
   ( Parser m

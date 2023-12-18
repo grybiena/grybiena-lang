@@ -5,6 +5,7 @@ import Prelude
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Data.Maybe (Maybe(..))
 import Data.Traversable (class Traversable)
+import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Category.Lit (Lit(..))
 import Language.Functor.Application (class Application)
@@ -12,6 +13,7 @@ import Language.Functor.Composition (class Composition, composition)
 import Language.Functor.Coproduct (class Inject, inj, prj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
+import Language.Functor.Parse (class Postfix)
 import Language.Functor.Reduction (infer)
 import Language.Functor.Universe (Universe)
 import Language.Lambda.Inference (class Arrow, unifyWithArrow)
@@ -24,6 +26,9 @@ newtype App a = App (a /\ a)
 instance Application App where
   app f g = App (f /\ g)
   unApp (App a) = a
+
+instance Functor App where
+  map f (App (a /\ b)) = App (f a /\ f b)
 
 instance
   ( Monad m
@@ -58,4 +63,11 @@ instance
   , Functor cat
   ) => Elimination App cat t m where
     elimination (App (a /\ b)) t =  composition (project a) (project b) t
+
+instance
+  ( Monad m
+  , Corecursive f cat
+  , Applicative p
+  ) => Postfix p App cat f m where 
+  postfix p = pure $ \f -> App <<< Tuple (embed f) <<< embed <$> p 
 

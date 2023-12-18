@@ -4,14 +4,15 @@ import Prelude
 
 import Control.Alt (class Alt)
 import Control.Comonad.Cofree (Cofree, deferCofree, (:<))
+import Control.Plus (class Plus, empty)
 import Data.Foldable (class Foldable)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
+import Language.Category.Var (class Fresh, Var, fresh)
+import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
-import Language.Functor.Coproduct (class Inject, inj)
-import Language.Category.Var (class Fresh, Var, fresh)
-import Language.Functor.Parse (class Parse)
+import Language.Functor.Parse (class Parse, class Postfix)
 import Language.Functor.Universe (Universe)
 import Language.Monad.Parser (class Parser, reserved)
 import Matryoshka (class Corecursive, embed)
@@ -53,6 +54,13 @@ instance
     elimination Hole t = do
        v <- fresh
        pure $ t :< inj v
+
+
+instance
+  ( Plus p
+  ) => Postfix p Hole cat f m where
+  postfix = pure empty
+
 
 instance
   ( Monad m

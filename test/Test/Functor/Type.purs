@@ -3,7 +3,6 @@ module Test.Functor.Type where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head)
-import Control.Lazy (fix)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (runStateT)
@@ -13,14 +12,14 @@ import Data.Traversable (traverse)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Class.Console (logShow)
-import Language.Monad.Context (class Context, Ctx, emptyCtx)
-import Language.Functor.Reduction (infer, reduce)
-import Language.Functor.Coproduct (type (:+:))
+import Language.Category.Forall (Forall)
 import Language.Category.Hole (Hole)
 import Language.Category.Var (class Fresh, Var)
-import Language.Functor.Parse (parse)
-import Language.Category.Forall (Forall)
+import Language.Functor.Coproduct (type (:+:))
+import Language.Functor.Parse (parser)
+import Language.Functor.Reduction (infer, reduce)
 import Language.Functor.Universe (Universe, flatten)
+import Language.Monad.Context (class Context, Ctx, emptyCtx)
 import Matryoshka (embed, project)
 import Parsing (ParseError, runParserT)
 
@@ -49,7 +48,7 @@ foofa = do
 type Foo = (Hole :+: Forall :+: Var)
 
 parseFoo :: forall m . MonadRec m => String -> m (Either ParseError (Mu Bar))
-parseFoo s = runParserT s (embed <$> fix parse)
+parseFoo s = runParserT s (embed <$> parser)
 
 
  

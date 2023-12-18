@@ -5,6 +5,7 @@ import Prelude
 import Control.Alt (class Alt)
 import Control.Comonad.Cofree ((:<))
 import Control.Monad.State (class MonadState, modify)
+import Control.Plus (class Plus, empty)
 import Data.Array as Array
 import Data.CodePoint.Unicode (isUpper)
 import Data.Eq.Generic (genericEq)
@@ -15,12 +16,12 @@ import Data.Ord.Generic (genericCompare)
 import Data.String.CodePoints (codePointFromChar)
 import Data.String.CodeUnits (toCharArray)
 import Data.Traversable (class Traversable, traverse)
-import Language.Monad.Context (class Context, class NotInScopeError, Ctx(..), require)
+import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
-import Language.Functor.Coproduct (class Inject, inj)
-import Language.Functor.Parse (class Parse)
+import Language.Functor.Parse (class Parse, class Postfix)
 import Language.Functor.Universe (Universe)
+import Language.Monad.Context (class Context, class NotInScopeError, Ctx(..), require)
 import Language.Monad.Parser (class Parser, fail, identifier)
 
 newtype Var :: forall k. k -> Type
@@ -77,6 +78,13 @@ instance
   , Inject Var cat
   ) => Elimination Var cat typ m where
     elimination v t = pure (t :< inj v)
+
+
+instance
+  ( Plus p
+  ) => Postfix p Var cat f m where
+  postfix = pure empty
+
 
 instance
   ( Monad m
