@@ -9,6 +9,10 @@ import Data.Traversable (class Traversable, traverse)
 data Coproduct :: (Type -> Type) -> (Type -> Type) -> Type -> Type
 data Coproduct f g a = Inl (f a) | Inr (g a)
 
+instance (Show (f a), Show (g a)) => Show (Coproduct f g a) where
+  show (Inl l) = show l 
+  show (Inr r) = show r
+
 instance (Functor f, Functor g) => Functor (Coproduct f g) where
   map f (Inl l) = Inl (f <$> l)
   map f (Inr r) = Inr (f <$> r)

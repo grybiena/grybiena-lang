@@ -2,35 +2,56 @@ module Language.Functor.Ident.Var where
 
 import Prelude
 
+import Control.Alt (class Alt)
 import Control.Comonad.Cofree ((:<))
+import Control.Monad.State (class MonadState, modify)
 import Data.Array as Array
 import Data.CodePoint.Unicode (isUpper)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
+import Data.Ord.Generic (genericCompare)
 import Data.String.CodePoints (codePointFromChar)
 import Data.String.CodeUnits (toCharArray)
 import Data.Traversable (class Traversable, traverse)
-import Language.Category.Context (class Context, require)
+import Language.Category.Context (class Context, class NotInScopeError, Ctx(..), require)
 import Language.Category.Elimination (class Elimination)
 import Language.Category.Inference (class Inference)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Parse (class Parse)
 import Language.Functor.Type.Universe (Universe)
-import Language.Parser (class LanguageParser, fail, identifier)
+import Language.Parser (class Parser, fail, identifier)
 
 newtype Var :: forall k. k -> Type
 newtype Var a = Var String
 
+instance Show (Var a) where
+  show (Var v) = v
 
 class Fresh m where
   fresh :: forall (a :: Type). m (Var a)
+
+class Counter c where
+  increment :: c -> c
+  count :: c -> Int
+
+instance Counter (Ctx var typ) where
+  increment (Ctx c) = Ctx (c { count = c.count + 1 })
+  count (Ctx c) = c.count
+
+instance ( MonadState c m, Counter c ) => Fresh m where
+  fresh = do
+     i <- count <$> modify increment 
+     pure $ Var ("v" <> show i)
 
 derive instance Generic (Var a) _
 
 instance Eq (Var a) where
   eq = genericEq
+
+instance Ord (Var a) where
+  compare = genericCompare
 
 instance Functor Var where
   map _ (Var v) = Var v
@@ -59,13 +80,15 @@ instance
 
 instance
   ( Monad m
-  , LanguageParser m
-  , Functor cat
+  , Parser m
+  , Alt m
   ) => Parse Var cat f m where
-  parse = do
+  parse _ = do
       i <- identifier 
       if Just false == ((isUpper <<< codePointFromChar) <$> (Array.head $ toCharArray i))
         then pure (Var i)
         else fail "Variables must not start with an upper case char."
 
+instance NotInScopeError Var String where
+  notInScopeError (Var v) = "not in scope: " <> v
 

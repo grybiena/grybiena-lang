@@ -2,26 +2,27 @@ module Language.Functor.Type.Forall where
 
 import Prelude
 
-import Control.Comonad.Cofree (Cofree, head, (:<))
+import Control.Comonad.Cofree (head, (:<))
 import Data.Foldable (class Foldable)
-import Data.Functor.Mu (Mu)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Category.Context (class Context, assume)
 import Language.Category.Elimination (class Elimination)
 import Language.Category.Inference (class Inference)
-import Language.Category.Reduction (infer, reduce)
-import Language.Functor.Coproduct (class Inject, type (:+:), inj)
+import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Ident.Hole (Hole, hole)
-import Language.Functor.Ident.Var (class Fresh, Var(..))
+import Language.Functor.Ident.Var (Var(..))
 import Language.Functor.Parse (class Parse, parse)
 import Language.Functor.Type.Universe (Universe)
-import Language.Parser (class LanguageParser, reserved, reservedOp)
+import Language.Parser (class Parser, reserved, reservedOp)
 import Matryoshka (class Corecursive, embed)
 
 
 newtype Forall a = Forall (Var a /\ a)
+
+instance Show a => Show (Forall a) where
+  show (Forall (v /\ a)) = "forall " <> show v <> " . " <> show a
 
 instance Functor Forall where
   map f (Forall (v /\ a)) = Forall ((f <$> v) /\ f a)
@@ -54,36 +55,14 @@ instance
     elimination v t = pure (t :< inj v)
 
 instance
-  ( LanguageParser m
-  , Monad m
-  , Corecursive (f cat) cat
+  ( Parser m
+  , Corecursive f cat
   , Parse Var cat f m 
-  , Parse cat cat f m
   ) => Parse Forall cat f m where
-  parse = do
+  parse p = do
      reserved "forall"
-     (v :: Var (f cat)) <- parse
+     (v :: Var f) <- parse p
      reservedOp "."
-     (c :: cat (f cat)) <- parse 
+     (c :: cat f) <- p
      pure (Forall (v /\ embed c))
-
-type Foo = (Hole :+: Forall :+: Var)
-
-
-parso :: forall m.
-         LanguageParser m
-      => Monad m
-      => m (Mu (Foo))
-parso = parse
- 
-infero :: forall m.
-          Monad m
-       => Context Var (Universe Foo) m 
-       => Mu Foo -> m (Cofree Foo (Universe Foo))
-infero = infer
-
-type Bar = Forall :+: Var
-
-reduco :: forall m. Monad m => Fresh m => Cofree Foo (Universe Foo) -> m (Cofree Bar (Universe Foo))
-reduco = reduce
 

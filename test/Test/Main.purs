@@ -9,6 +9,7 @@ import Effect.Class.Console (logShow)
 import Language.Functor.Type.Level (Level, toInfinity)
 import Language.Functor.Type.Universe (Universe, ascend)
 import Matryoshka (project)
+import Test.Functor.Type (foofa)
 import Test.Graph (graphTests)
 import Test.Term.Compile (compileTestSuite)
 import Test.Term.Eval (evalTestSuite)
@@ -26,3 +27,5 @@ main = do
   inferKindSuite
   compileTestSuite
   evalTestSuite
+
+  foofa

@@ -2,6 +2,7 @@ module Language.Functor.Ident.Hole where
 
 import Prelude
 
+import Control.Alt (class Alt)
 import Control.Comonad.Cofree (deferCofree, (:<))
 import Data.Foldable (class Foldable)
 import Data.Functor.Mu (Mu(..))
@@ -13,10 +14,13 @@ import Language.Functor.Coproduct (class Inject, type (:+:), inj)
 import Language.Functor.Ident.Var (class Fresh, Var, fresh)
 import Language.Functor.Parse (class Parse)
 import Language.Functor.Type.Universe (Universe)
-import Language.Parser (class LanguageParser, reserved)
+import Language.Parser (class Parser, reserved)
 
 data Hole :: forall k. k -> Type
 data Hole a = Hole
+
+instance Show (Hole a) where
+  show Hole = "_"
 
 instance Functor Hole where
   map _ Hole = Hole
@@ -44,15 +48,15 @@ instance
   ( Monad m
   , Fresh m
   , Inject Var typ
-  ) => Elimination Hole typ (Universe (Hole :+: typ)) m where
+  ) => Elimination Hole typ f m where
     elimination Hole t = do
        v <- fresh
        pure $ t :< inj v
 
 instance
   ( Monad m
-  , LanguageParser m
-  , Functor cat
+  , Parser m
+  , Alt m
   ) => Parse Hole cat f m where
-  parse = reserved "_" *> pure Hole
+  parse _ = reserved "_" *> pure Hole
 
