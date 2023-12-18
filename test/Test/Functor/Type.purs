@@ -12,6 +12,7 @@ import Data.Traversable (traverse)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Class.Console (logShow)
+import Language.Category.App (App)
 import Language.Category.Forall (Forall)
 import Language.Category.Hole (Hole)
 import Language.Category.Var (class Fresh, Var)
@@ -25,8 +26,9 @@ import Parsing (ParseError, runParserT)
 
 foofa :: Effect Unit
 foofa = do
---  foo <- parseFoo "a"
---  logShow foo
+
+  goo <- parseFoo "forall a . a b c"
+  logShow goo
 
   foo <- parseFoo "forall a . a"
   logShow foo
@@ -45,7 +47,7 @@ foofa = do
   pure unit
 
 
-type Foo = (Hole :+: Forall :+: Var)
+type Foo = (Hole :+: Forall :+: App :+: Var)
 
 parseFoo :: forall m . MonadRec m => String -> m (Either ParseError (Mu Bar))
 parseFoo s = runParserT s (embed <$> parser)
@@ -58,7 +60,7 @@ infero :: forall m.
        => Mu Bar -> m (Cofree Bar (Universe Mu Foo))
 infero = infer
 
-type Bar = Forall :+: Var
+type Bar = Forall :+: App :+: Var
 
 reduco :: forall m.
           Monad m

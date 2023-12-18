@@ -11,18 +11,18 @@ import Language.Functor.Application (class Application, app)
 import Language.Functor.Coproduct (class Inject, type (:+:), Coproduct(..), inj)
 
 
-class Composition obj cat t m where
+class Composition app obj cat t m | cat -> app where
   composition :: EnvT t obj (Cofree cat t) -> EnvT t obj (Cofree cat t) -> t -> m (Cofree cat t)
 
 instance
-  ( Composition a cat t m
-  , Composition b cat t m
+  ( Composition app a cat t m
+  , Composition app b cat t m
   , Applicative m
   , Inject app cat
   , Inject a cat
   , Inject b cat
   , Application app
-  ) => Composition (a :+: b) cat t m where
+  ) => Composition app (a :+: b) cat t m where
     composition f g t =
       case runEnvT f /\ runEnvT g of
         (ta /\ Inl a) /\ (tb /\ Inl b) -> composition (EnvT (ta /\ a))  (EnvT (tb /\ b)) t
@@ -33,7 +33,7 @@ else
 instance
   ( Applicative m
   , Inject Opaque cat
-  ) => Composition Opaque cat t m where
+  ) => Composition app Opaque cat t m where
     composition f g t = do
       let Opaque a = snd $ runEnvT f
           Opaque b = snd $ runEnvT g 
@@ -46,7 +46,7 @@ instance
   , Inject app cat
   , Inject obj cat
   , Application app
-  ) => Composition obj cat t m where
+  ) => Composition app obj cat t m where
     composition f g t =
       case runEnvT f /\ runEnvT g of
         (ta /\ a) /\ (tb /\b) -> pure $ t :< inj (app (ta :< inj a) (tb :< inj b) :: app (Cofree cat t)) 
