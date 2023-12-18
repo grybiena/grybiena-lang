@@ -1,4 +1,4 @@
-module Language.Parser where
+module Language.Monad.Parser where
 
 import Prelude
 

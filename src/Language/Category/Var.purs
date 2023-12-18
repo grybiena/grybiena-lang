@@ -21,7 +21,7 @@ import Language.Functor.Inference (class Inference)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Parse (class Parse)
 import Language.Functor.Universe (Universe)
-import Language.Parser (class Parser, fail, identifier)
+import Language.Monad.Parser (class Parser, fail, identifier)
 
 newtype Var :: forall k. k -> Type
 newtype Var a = Var String

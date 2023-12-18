@@ -15,7 +15,7 @@ import Language.Category.Hole (Hole, hole)
 import Language.Category.Var (Var(..))
 import Language.Functor.Parse (class Parse, parse)
 import Language.Functor.Universe (Universe)
-import Language.Parser (class Parser, reserved, reservedOp)
+import Language.Monad.Parser (class Parser, reserved, reservedOp)
 import Matryoshka (class Corecursive, embed)
 
 

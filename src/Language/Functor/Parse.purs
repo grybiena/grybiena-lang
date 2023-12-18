@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Alt (class Alt, (<|>))
 import Language.Functor.Coproduct (type (:+:), Coproduct(..))
-import Language.Parser (class Parser, try)
+import Language.Monad.Parser (class Parser, try)
 
 
 class Parse :: forall k. (k -> Type) -> (k -> Type) -> k -> (Type -> Type) -> Constraint

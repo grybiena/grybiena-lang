@@ -13,7 +13,7 @@ import Language.Functor.Coproduct (class Inject, inj)
 import Language.Category.Var (class Fresh, Var, fresh)
 import Language.Functor.Parse (class Parse)
 import Language.Functor.Universe (Universe)
-import Language.Parser (class Parser, reserved)
+import Language.Monad.Parser (class Parser, reserved)
 import Matryoshka (class Corecursive, embed)
 
 data Hole :: forall k. k -> Type
