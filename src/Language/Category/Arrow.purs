@@ -51,8 +51,7 @@ instance
        unify (toInfinity 1 :: Universe u typ) (head a)
        b <- inferB
        unify (toInfinity 1 :: Universe u typ) (head b)
-
-       unsafeCoerce unit
+       pure $ toInfinity 1 :< inj (Arrow (a /\ b))
 
 
  

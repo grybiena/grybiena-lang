@@ -11,6 +11,7 @@ import Data.Maybe (Maybe, maybe)
 class Context var typ m where
   assume :: var Void -> typ -> m Unit
   require :: var Void -> m typ
+  replace :: m (var Void -> Maybe typ)
 
 class Environment var typ c where
   putEnv :: var Void -> typ -> c -> c
@@ -30,6 +31,9 @@ instance
   require v = do
      e <- get
      maybe (throwError (notInScopeError v)) pure (getEnv v e)
+  replace = do
+     e <- get
+     pure (flip getEnv e)
 
 
 newtype Ctx var typ = Ctx { ctx :: Map (var Void) typ, count :: Int }
