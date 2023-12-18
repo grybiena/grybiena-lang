@@ -1,14 +1,14 @@
-module Language.Functor.Value.Basis where
+module Language.Category.Basis where
 
 import Prelude
 
 import Control.Comonad.Cofree ((:<))
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
-import Language.Functor.Value.Opaque (Opaque(..))
+import Language.Category.Opaque (Opaque(..))
 import Language.Functor.Coproduct (class Inject, inj)
 import Unsafe.Coerce (unsafeCoerce)
-import Language.Category.Elimination (class Elimination)
+import Language.Functor.Elimination (class Elimination)
 
 data Basis :: forall k. k -> Type
 data Basis a = S | K | I | B | C

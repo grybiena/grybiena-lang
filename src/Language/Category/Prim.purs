@@ -1,11 +1,11 @@
-module Language.Functor.Value.Prim where
+module Language.Category.Prim where
 
 import Prelude
 
 import Control.Comonad.Cofree ((:<))
-import Language.Category.Elimination (class Elimination)
+import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Coproduct (class Inject, inj)
-import Language.Functor.Value.Opaque (Opaque(..))
+import Language.Category.Opaque (Opaque(..))
 import Prim as Prim
 import Unsafe.Coerce (unsafeCoerce)
 

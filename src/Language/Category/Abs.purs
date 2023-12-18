@@ -1,21 +1,20 @@
-module Language.Functor.Value.Abs where
+module Language.Category.Abs where
 
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
 import Data.Maybe (Maybe(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Category.Application (class Application, app, unApp)
-import Language.Category.Arrow (class Arrow, (:=>:))
-import Language.Category.Context (class Context, assume)
-import Language.Category.Elimination (class Elimination)
-import Language.Category.Fresh (class Fresh, fresh)
-import Language.Category.Inference (class Inference, inference)
-import Language.Category.Rewrite (class Rewrite, rewrite)
+import Language.Functor.Application (class Application, app, unApp)
+import Language.Functor.Arrow (class Arrow, (:=>:))
+import Language.Monad.Context (class Context, assume)
+import Language.Functor.Elimination (class Elimination)
+import Language.Monad.Fresh (class Fresh, fresh)
+import Language.Functor.Inference (class Inference, inference)
+import Language.Monad.Rewrite (class Rewrite, rewrite)
 import Language.Functor.Coproduct (class Inject, inj, prj)
-import Language.Functor.Ident.Var (Var(..))
-import Language.Functor.Value.Basis (Basis(..))
-
+import Language.Category.Var (Var(..))
+import Language.Category.Basis (Basis(..))
 
 
 newtype Abs :: forall k. k -> Type -> Type

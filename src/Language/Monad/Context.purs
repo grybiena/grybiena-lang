@@ -1,4 +1,4 @@
-module Language.Category.Context where
+module Language.Monad.Context where
 
 import Prelude
 

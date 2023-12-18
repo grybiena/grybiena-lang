@@ -1,4 +1,4 @@
-module Language.Category.Inference where
+module Language.Functor.Inference where
 
 import Prelude
 

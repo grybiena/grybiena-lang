@@ -1,4 +1,4 @@
-module Language.Functor.Ident.Hole where
+module Language.Category.Hole where
 
 import Prelude
 
@@ -7,12 +7,12 @@ import Control.Comonad.Cofree (Cofree, deferCofree, (:<))
 import Data.Foldable (class Foldable)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
-import Language.Category.Elimination (class Elimination)
-import Language.Category.Inference (class Inference)
+import Language.Functor.Elimination (class Elimination)
+import Language.Functor.Inference (class Inference)
 import Language.Functor.Coproduct (class Inject, inj)
-import Language.Functor.Ident.Var (class Fresh, Var, fresh)
+import Language.Category.Var (class Fresh, Var, fresh)
 import Language.Functor.Parse (class Parse)
-import Language.Functor.Type.Universe (Universe)
+import Language.Functor.Universe (Universe)
 import Language.Parser (class Parser, reserved)
 import Matryoshka (class Corecursive, embed)
 

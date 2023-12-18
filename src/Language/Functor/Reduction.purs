@@ -1,4 +1,4 @@
-module Language.Category.Reduction where
+module Language.Functor.Reduction where
 
 import Prelude
 
@@ -7,8 +7,8 @@ import Control.Comonad.Env (EnvT, runEnvT)
 import Data.Traversable (class Traversable)
 import Data.Tuple (uncurry)
 import Matryoshka (class Recursive, cata, cataM, embed, project)
-import Language.Category.Elimination (class Elimination, elimination)
-import Language.Category.Inference (class Inference, inference)
+import Language.Functor.Elimination (class Elimination, elimination)
+import Language.Functor.Inference (class Inference, inference)
 
 class (Functor obj, Functor cat) <= Reduction obj f g cat m where
   reduction :: obj f -> m (cat g)

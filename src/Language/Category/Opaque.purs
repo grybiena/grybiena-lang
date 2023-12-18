@@ -1,9 +1,9 @@
-module Language.Functor.Value.Opaque where
+module Language.Category.Opaque where
 
 import Prelude
 
 import Control.Comonad.Cofree ((:<))
-import Language.Category.Elimination (class Elimination)
+import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Coproduct (class Inject, inj)
 import Unsafe.Coerce (unsafeCoerce)
 

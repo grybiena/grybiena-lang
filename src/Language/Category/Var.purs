@@ -1,4 +1,4 @@
-module Language.Functor.Ident.Var where
+module Language.Category.Var where
 
 import Prelude
 
@@ -15,12 +15,12 @@ import Data.Ord.Generic (genericCompare)
 import Data.String.CodePoints (codePointFromChar)
 import Data.String.CodeUnits (toCharArray)
 import Data.Traversable (class Traversable, traverse)
-import Language.Category.Context (class Context, class NotInScopeError, Ctx(..), require)
-import Language.Category.Elimination (class Elimination)
-import Language.Category.Inference (class Inference)
+import Language.Monad.Context (class Context, class NotInScopeError, Ctx(..), require)
+import Language.Functor.Elimination (class Elimination)
+import Language.Functor.Inference (class Inference)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Parse (class Parse)
-import Language.Functor.Type.Universe (Universe)
+import Language.Functor.Universe (Universe)
 import Language.Parser (class Parser, fail, identifier)
 
 newtype Var :: forall k. k -> Type

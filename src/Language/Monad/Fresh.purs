@@ -1,4 +1,4 @@
-module Language.Category.Fresh where
+module Language.Monad.Fresh where
 
 
 class Fresh a m where

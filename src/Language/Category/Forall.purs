@@ -1,4 +1,4 @@
-module Language.Functor.Type.Forall where
+module Language.Category.Forall where
 
 import Prelude
 
@@ -7,14 +7,14 @@ import Data.Foldable (class Foldable)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Category.Context (class Context, assume)
-import Language.Category.Elimination (class Elimination)
-import Language.Category.Inference (class Inference)
+import Language.Monad.Context (class Context, assume)
+import Language.Functor.Elimination (class Elimination)
+import Language.Functor.Inference (class Inference)
 import Language.Functor.Coproduct (class Inject, inj)
-import Language.Functor.Ident.Hole (Hole, hole)
-import Language.Functor.Ident.Var (Var(..))
+import Language.Category.Hole (Hole, hole)
+import Language.Category.Var (Var(..))
 import Language.Functor.Parse (class Parse, parse)
-import Language.Functor.Type.Universe (Universe)
+import Language.Functor.Universe (Universe)
 import Language.Parser (class Parser, reserved, reservedOp)
 import Matryoshka (class Corecursive, embed)
 

@@ -1,4 +1,4 @@
-module Language.Category.Elimination where
+module Language.Functor.Elimination where
 
 import Control.Comonad.Cofree (Cofree)
 import Language.Functor.Coproduct (type (:+:), Coproduct(..))

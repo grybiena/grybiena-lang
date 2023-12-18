@@ -1,4 +1,4 @@
-module Language.Functor.Value.App where
+module Language.Category.App where
 
 import Prelude
 
@@ -8,15 +8,14 @@ import Data.Maybe (Maybe(..))
 import Data.Traversable (class Traversable)
 import Data.Tuple (snd)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Category.Application (class Application)
-import Language.Category.Elimination (class Elimination)
-import Language.Category.Inference (class Inference)
-import Language.Category.Reduction (infer)
+import Language.Functor.Application (class Application)
+import Language.Functor.Elimination (class Elimination)
+import Language.Functor.Inference (class Inference)
+import Language.Functor.Reduction (infer)
 import Language.Functor.Coproduct (class Inject, type (:+:), Coproduct(..), inj, prj)
-import Language.Functor.Type.App as Type
-import Language.Functor.Type.Lit (Lit(..))
-import Language.Functor.Type.Universe (Universe)
-import Language.Functor.Value.Opaque (Opaque(..))
+import Language.Category.Lit (Lit(..))
+import Language.Functor.Universe (Universe)
+import Language.Category.Opaque (Opaque(..))
 import Language.Lambda.Inference (class Arrow, unifyWithArrow)
 import Language.Lambda.Unification (class Fresh, class Rewrite, class Unify, rewrite, unify)
 import Matryoshka (class Corecursive, class Recursive, embed, project)
@@ -40,7 +39,7 @@ instance
 --  , Inject Var tt
 --  , Inject (Abs App) tt
   , Inject App cat 
-  , Inject Type.App t
+  , Inject App t
   , Inject (Lit (Universe u t)) cat
   , Traversable t
   , Inference t t (Universe u t) m
@@ -51,7 +50,7 @@ instance
       a <- inferA
       case prj (tail a) of
         Just (Lit t) -> do
-          z <- infer ((inj (Type.App (head f /\ t))) :: t (Universe u t))
+          z <- infer ((inj (App (head f /\ t))) :: t (Universe u t))
           pure $ embed z :< tail f
         Nothing -> do
 

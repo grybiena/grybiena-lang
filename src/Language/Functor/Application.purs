@@ -1,4 +1,4 @@
-module Language.Category.Application where
+module Language.Functor.Application where
 
 import Data.Tuple.Nested (type (/\))
 

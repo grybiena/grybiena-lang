@@ -1,4 +1,4 @@
-module Language.Functor.Type.Level where
+module Language.Category.Level where
 
 import Prelude
 
@@ -6,9 +6,9 @@ import Control.Comonad.Cofree (Cofree, deferCofree, (:<))
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
 import Data.Tuple.Nested ((/\))
-import Language.Category.Inference (class Inference)
+import Language.Functor.Inference (class Inference)
 import Language.Functor.Coproduct (class Inject, inj)
-import Language.Functor.Type.Universe (Universe)
+import Language.Functor.Universe (Universe)
 import Matryoshka (class Corecursive, embed)
 
 newtype Level :: forall k. k -> Type

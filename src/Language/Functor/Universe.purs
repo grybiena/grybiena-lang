@@ -1,4 +1,4 @@
-module Language.Functor.Type.Universe where
+module Language.Functor.Universe where
 
 import Control.Alt (class Functor, (<$>))
 import Control.Category ((<<<))
