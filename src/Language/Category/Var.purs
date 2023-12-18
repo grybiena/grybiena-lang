@@ -91,7 +91,7 @@ instance
   , Parser m
   , Alt m
   ) => Parse Var cat f m where
-  parse _ = do
+  parse _ = pure do
       i <- identifier 
       if Just false == ((isUpper <<< codePointFromChar) <$> (Array.head $ toCharArray i))
         then pure (Var i)

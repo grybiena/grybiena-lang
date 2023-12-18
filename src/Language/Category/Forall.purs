@@ -13,7 +13,7 @@ import Language.Category.Var (Var(..))
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
-import Language.Functor.Parse (class Parse, class Postfix, parse)
+import Language.Functor.Parse (class Parse, class Postfix, parseable)
 import Language.Functor.Universe (Universe)
 import Language.Monad.Context (class Context, assume)
 import Language.Monad.Parser (class Parser, reserved, reservedOp)
@@ -66,9 +66,9 @@ instance
   , Corecursive f cat
   , Parse Var cat f m 
   ) => Parse Forall cat f m where
-  parse p = do
+  parse p = pure do
      reserved "forall"
-     (v :: Var f) <- parse p
+     (v :: Var f) <- parseable p 
      reservedOp "."
      (c :: cat f) <- p
      pure (Forall (v /\ embed c))

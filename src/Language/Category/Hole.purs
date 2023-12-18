@@ -67,5 +67,5 @@ instance
   , Parser m
   , Alt m
   ) => Parse Hole cat f m where
-  parse _ = reserved "_" *> pure Hole
+  parse _ = pure $ reserved "_" *> pure Hole
 

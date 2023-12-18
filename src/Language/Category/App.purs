@@ -93,5 +93,5 @@ instance
   ( Parser m
   , Alt m
   ) => Parse App cat f m where
-  parse _ = fail "App is a post fix parser."
+  parse = const Nothing 
 
