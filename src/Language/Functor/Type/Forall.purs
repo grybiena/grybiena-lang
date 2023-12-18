@@ -2,7 +2,7 @@ module Language.Functor.Type.Forall where
 
 import Prelude
 
-import Control.Comonad.Cofree (head, (:<))
+import Control.Comonad.Cofree (Cofree, head, (:<))
 import Data.Foldable (class Foldable)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
@@ -39,12 +39,13 @@ instance Traversable Forall where
 
 instance
   ( Monad m
-  , Context Var (Universe typ) m
+  , Context Var (Universe u t) m
   , Inject Forall cat 
-  , Inject Hole typ
-  ) => Inference Forall cat (Universe typ) m where
+  , Inject Hole t
+  , Corecursive (u (Cofree t)) (Cofree t)
+  ) => Inference Forall cat (Universe u t) m where
     inference (Forall (Var v /\ inferBody)) = do 
-      assume (Var v) (hole :: Universe typ) 
+      assume (Var v) (hole :: Universe u t) 
       bod <- inferBody      
       pure (head bod :< inj (Forall (Var v /\ bod)))
 

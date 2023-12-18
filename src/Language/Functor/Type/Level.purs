@@ -2,14 +2,14 @@ module Language.Functor.Type.Level where
 
 import Prelude
 
-import Control.Comonad.Cofree (deferCofree, (:<))
-import Data.Functor.Mu (Mu(..))
+import Control.Comonad.Cofree (Cofree, deferCofree, (:<))
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
 import Data.Tuple.Nested ((/\))
 import Language.Category.Inference (class Inference)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Type.Universe (Universe)
+import Matryoshka (class Corecursive, embed)
 
 newtype Level :: forall k. k -> Type
 newtype Level a = Level Int
@@ -24,11 +24,12 @@ instance Functor Level where
 
 instance
   ( Monad m 
-  , Inject Level typ 
-  ) => Inference Level typ (Universe typ) m where
+  , Inject Level t 
+  , Corecursive (u (Cofree t)) (Cofree t)
+  ) => Inference Level t (Universe u t) m where
     inference (Level i) = pure $ (toInfinity (i+1)) :< inj (Level i) 
 
-toInfinity :: forall typ. Inject Level typ => Int -> Universe typ 
-toInfinity i = In (deferCofree (\_ -> (toInfinity (i+1) /\ inj (Level i))))
+toInfinity :: forall u t. Inject Level t => Corecursive (u (Cofree t)) (Cofree t) => Int -> Universe u t 
+toInfinity i = embed (deferCofree (\_ -> (toInfinity (i+1) /\ inj (Level i))))
 
  

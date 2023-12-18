@@ -3,18 +3,18 @@ module Language.Functor.Ident.Hole where
 import Prelude
 
 import Control.Alt (class Alt)
-import Control.Comonad.Cofree (deferCofree, (:<))
+import Control.Comonad.Cofree (Cofree, deferCofree, (:<))
 import Data.Foldable (class Foldable)
-import Data.Functor.Mu (Mu(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
 import Language.Category.Elimination (class Elimination)
 import Language.Category.Inference (class Inference)
-import Language.Functor.Coproduct (class Inject, type (:+:), inj)
+import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Ident.Var (class Fresh, Var, fresh)
 import Language.Functor.Parse (class Parse)
 import Language.Functor.Type.Universe (Universe)
 import Language.Parser (class Parser, reserved)
+import Matryoshka (class Corecursive, embed)
 
 data Hole :: forall k. k -> Type
 data Hole a = Hole
@@ -37,12 +37,13 @@ instance Traversable Hole where
 
 instance 
   ( Monad m
-  , Inject Hole typ
-  ) => Inference Hole typ (Universe typ) m where
+  , Inject Hole t
+  , Corecursive (u (Cofree t)) (Cofree t)
+  ) => Inference Hole t (Universe u t) m where
     inference Hole = pure $ hole :< inj Hole 
 
-hole :: forall typ. Inject Hole typ => Universe typ
-hole = In (deferCofree (\_ -> (hole /\ inj Hole)))
+hole :: forall u t . Inject Hole t => Corecursive (u (Cofree t)) (Cofree t) => Universe u t
+hole = embed (deferCofree (\_ -> (hole /\ inj Hole)))
 
 instance
   ( Monad m

@@ -3,17 +3,27 @@ module Language.Functor.Type.Universe where
 import Control.Alt (class Functor, (<$>))
 import Control.Category ((<<<))
 import Control.Comonad.Cofree (Cofree, head, tail)
-import Data.Functor.Mu (Mu)
-import Matryoshka (embed, project)
+import Matryoshka (class Corecursive, class Recursive, embed, project)
 
-type Universe typ = Mu (Cofree typ)
+type Universe :: forall k. ((Type -> Type) -> k) -> (Type -> Type) -> k
+type Universe u t = u (Cofree t)
 
-ascend :: forall typ. Functor typ => Universe typ -> Universe typ
+ascend :: forall u t.
+          Functor t
+       => Recursive (u (Cofree t)) (Cofree t)
+       => Universe u t -> Universe u t 
 ascend = head <<< project
 
-flatten :: forall typ. Functor typ => Universe typ -> Mu typ 
+flatten :: forall u t.
+           Functor t
+        => Recursive (u (Cofree t)) (Cofree t)
+        => Corecursive (u t) t
+        => Universe u t -> u t 
 flatten = squash <<< project
 
-squash :: forall typ. Functor typ => Cofree typ (Mu (Cofree typ)) -> Mu typ
+squash :: forall u t.
+          Functor t
+       => Corecursive (u t) t
+       => Cofree t (u (Cofree t)) -> u t
 squash g = embed (squash <$> tail g) 
 

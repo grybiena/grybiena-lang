@@ -67,9 +67,9 @@ instance Traversable Var where
 
 instance
   ( Monad m
-  , Context Var (Universe typ) m
+  , Context Var (Universe u typ) m
   , Inject Var cat 
-  ) => Inference Var cat (Universe typ) m where
+  ) => Inference Var cat (Universe u typ) m where
     inference (Var v) = require (Var v) >>= \t -> pure (t :< inj (Var v)) 
 
 instance 

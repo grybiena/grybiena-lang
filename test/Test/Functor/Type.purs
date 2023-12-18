@@ -2,17 +2,17 @@ module Test.Functor.Type where
 
 import Prelude
 
-import Control.Comonad.Cofree (Cofree, head, tail)
+import Control.Comonad.Cofree (Cofree, head)
 import Control.Lazy (fix)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
-import Control.Monad.State (evalStateT, runStateT)
+import Control.Monad.State (runStateT)
 import Data.Either (Either(..))
 import Data.Functor.Mu (Mu)
 import Data.Traversable (traverse)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
-import Effect.Class.Console (log, logShow)
+import Effect.Class.Console (logShow)
 import Language.Category.Context (class Context, Ctx, emptyCtx)
 import Language.Category.Reduction (infer, reduce)
 import Language.Functor.Coproduct (type (:+:))
@@ -34,7 +34,7 @@ foofa = do
   case foo of
     Left _ -> pure unit
     Right fo -> do
-       (i /\ ctx) <- flip runStateT (emptyCtx :: Ctx Var (Universe Foo)) $ runExceptT $ infero fo >>= traverse reduca 
+       (i /\ ctx) <- flip runStateT (emptyCtx :: Ctx Var (Universe Mu Foo)) $ runExceptT $ infero fo >>= traverse reduca 
        case i of
          Left (_ :: String) -> pure unit
          Right t -> do
@@ -55,8 +55,8 @@ parseFoo s = runParserT s (embed <$> fix parse)
  
 infero :: forall m.
           Monad m
-       => Context Var (Universe Foo) m 
-       => Mu Bar -> m (Cofree Bar (Universe Foo))
+       => Context Var (Universe Mu Foo) m 
+       => Mu Bar -> m (Cofree Bar (Universe Mu Foo))
 infero = infer
 
 type Bar = Forall :+: Var
@@ -64,12 +64,12 @@ type Bar = Forall :+: Var
 reduco :: forall m.
           Monad m
        => Fresh m
-       => Cofree Foo (Universe Foo) -> m (Cofree Foo (Universe Foo))
+       => Cofree Foo (Universe Mu Foo) -> m (Cofree Foo (Universe Mu Foo))
 reduco = reduce
 
 reduca :: forall m.
           Monad m
        => Fresh m
-       => Universe Foo -> m (Universe Foo)
+       => Universe Mu Foo -> m (Universe Mu Foo)
 reduca = map embed <<< reduco <<< project
 
