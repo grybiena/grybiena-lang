@@ -61,8 +61,8 @@ instance
   ( Monad m 
   , Inject Level t 
   , Corecursive (u (Cofree t)) (Cofree t)
-  ) => Inference Level t (Universe u t) m where
-    inference (Level i) = pure $ (toInfinity (i+1)) :< inj (Level i) 
+  ) => Inference var Level t (Universe u t) m where
+    inference _ (Level i) = pure $ (toInfinity (i+1)) :< inj (Level i) 
 
 toInfinity :: forall u t. Inject Level t => Corecursive (u (Cofree t)) (Cofree t) => Int -> Universe u t 
 toInfinity i = embed (deferCofree (\_ -> (toInfinity (i+1) /\ inj (Level i))))

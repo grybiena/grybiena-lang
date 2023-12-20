@@ -2,7 +2,7 @@ module Language.Functor.Unification where
 
 import Prelude
 
-import Control.Comonad.Cofree (Cofree)
+import Control.Comonad.Cofree (Cofree, (:<))
 import Control.Comonad.Env (EnvT(..), runEnvT)
 import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Data.List (List(..))
@@ -10,9 +10,27 @@ import Data.List as List
 import Data.Traversable (traverse)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Functor.Coproduct (type (:+:), Coproduct(..))
-import Language.Functor.Universe (Universe)
-import Matryoshka (class Recursive, project)
+import Language.Functor.Coproduct (class Inject, type (:+:), Coproduct(..), inj)
+import Language.Functor.Universe (Universe, flatten)
+import Matryoshka (class Corecursive, class Recursive, embed, project)
+
+type Layer a u t = EnvT (Universe u t) a (Cofree t (Universe u t))
+
+class UnificationError a b err where
+  unificationError :: a -> b -> err
+
+instance
+  ( Functor t
+  , Inject a t
+  , Inject b t
+  , Corecursive (u (Cofree t)) (Cofree t)
+  , Corecursive (u t) t
+  , Recursive (u (Cofree t)) (Cofree t)
+  , Show (u t)
+  ) => UnificationError (Layer a u t) (Layer b u t) String where
+  unificationError (EnvT (ta /\ a)) (EnvT (tb /\ b)) =
+    "unification error: " <> show (flatten (embed (ta :< inj a))) <> " =?= " <> show (flatten (embed (tb :< inj b)))
+
 
 class Unification l r t i m where
   unification :: EnvT t l i -> EnvT t r i -> m (List (i /\ i)) 

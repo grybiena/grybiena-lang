@@ -3,33 +3,31 @@ module Language.Category.App where
 import Prelude
 
 import Control.Alt (class Alt)
-import Control.Comonad.Cofree (Cofree, head, tail, (:<))
+import Control.Comonad.Cofree (Cofree, head, (:<))
 import Control.Comonad.Env (EnvT(..))
+import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Control.Monad.Rec.Class (class MonadRec)
 import Data.Foldable (class Foldable)
-import Data.List (List(..))
 import Data.List as List
 import Data.Maybe (Maybe(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Debug (traceM)
 import Language.Category.Arrow (Arrow, unifyWithArrow)
 import Language.Category.Hole (Hole)
-import Language.Category.Var (class Fresh, Var, freshHole)
 import Language.Functor.Application (class Application)
 import Language.Functor.Composition (class Composition, composition)
-import Language.Functor.Coproduct (class Inject, inj, prj)
+import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
 import Language.Functor.Parse (class Parse, class Postfix)
-import Language.Functor.Unification (class Unification, unification, unify)
+import Language.Functor.Unification (class Unification, class UnificationError, Layer, unificationError, unify)
 import Language.Functor.Universe (Universe)
-import Language.Monad.Context (class Context)
+import Language.Monad.Context (class Rewrite, class Subtext, rewrite)
+import Language.Monad.Fresh (class Fresh)
 import Language.Monad.Parser (class Parser)
-import Language.Monad.Rewrite (class Rewrite, rewrite)
 import Matryoshka (class Corecursive, class Recursive, embed, project)
-import Unsafe.Coerce (unsafeCoerce)
+import Type.Proxy (Proxy(..))
 
 
 newtype App a = App (a /\ a)
@@ -58,36 +56,39 @@ instance
   , Inject App cat 
   , Inject App t
   , Unification t t (Universe u t) (Cofree t (Universe u t)) m 
-  , Fresh m
+  , Fresh (var (Cofree t (Universe u t))) m 
   , Functor t
   , Recursive (u (Cofree t)) (Cofree t)
   , Inject Arrow t
-  , Inject Var t
+  , Inject var t
   , Inject Hole t
   , Traversable t
-  , Context Var (Universe u t) m
+  , Subtext var (Universe u t) m
   , Corecursive (u (Cofree t)) (Cofree t)
-  , Rewrite (Universe u t) m
-  ) => Inference App cat (Universe u t) m where
-    inference (App (inferF /\ inferA)) = do 
+  , Rewrite var (Universe u t) m
+  ) => Inference var App cat (Universe u t) m where
+    inference p (App (inferF /\ inferA)) = do 
       (f :: Cofree cat (Universe u t)) <- inferF
       a <- inferA
-      arrArg /\ arrRet <- unifyWithArrow (head f)
+      arrArg /\ arrRet <- unifyWithArrow p (head f)
       unify (arrArg) (head a)
-      arrRet' <- rewrite arrRet
+      arrRet' <- rewrite (Proxy :: Proxy var) arrRet
       pure $ arrRet' :< (inj (App (f /\ a))) 
 
 instance
   ( Monad m
+  , Recursive (u (Cofree t)) (Cofree t)
   ) => Unification App App (Universe u t) (Cofree t (Universe u t)) m where 
-    unification (EnvT (_ /\ App (a /\ b))) (EnvT (_ /\ App (c /\ d))) = do
-       pure $ List.fromFoldable [(a /\ c), (b /\ d)] 
+    unification (EnvT (ta /\ App (a /\ b))) (EnvT (tb /\ App (c /\ d))) = do
+       pure $ List.fromFoldable [(project ta /\ project tb),(a /\ c), (b /\ d)] 
 
 else 
 instance
   ( Monad m
-  ) => Unification App a t i m where
-    unification _ _ = pure Nil
+  , UnificationError (Layer App u t) (Layer q u t) err 
+  , MonadThrow err m
+  ) => Unification App q (Universe u t) (Cofree t (Universe u t)) m where
+    unification a b = throwError $ unificationError a b 
 
 instance
   ( Monad m

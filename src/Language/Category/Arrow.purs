@@ -17,17 +17,17 @@ import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Category.Hole (Hole)
 import Language.Category.Level (Level, toInfinity)
-import Language.Category.Var (class Fresh, Var, freshHole)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
 import Language.Functor.Parse (class Parse, class Postfix)
 import Language.Functor.Unification (class Unification, unify)
 import Language.Functor.Universe (Universe)
-import Language.Monad.Context (class Context)
+import Language.Monad.Context (class Subtext, rewrite)
+import Language.Monad.Fresh (class Fresh, freshHole)
 import Language.Monad.Parser (class Parser, reservedOp)
-import Language.Monad.Rewrite (rewrite)
 import Matryoshka (class Corecursive, class Recursive, embed, project)
+import Type.Proxy (Proxy)
 
 data Arrow a = Arrow (a /\ a)
 
@@ -71,8 +71,8 @@ instance
   , Unification typ typ (Universe u typ) (Cofree typ (Universe u typ)) m
   , Corecursive (u (Cofree typ)) (Cofree typ)
   , Recursive (u (Cofree typ)) (Cofree typ)
-  ) => Inference Arrow typ (Universe u typ) m where
-    inference (Arrow (inferA /\ inferB)) = do 
+  ) => Inference var Arrow typ (Universe u typ) m where
+    inference _ (Arrow (inferA /\ inferB)) = do 
        a <- inferA
        unify (toInfinity 1 :: Universe u typ) (head a)
        b <- inferB
@@ -82,9 +82,10 @@ instance
 
 instance
   ( Monad m
+  , Recursive (u (Cofree t)) (Cofree t)
   ) => Unification Arrow Arrow (Universe u t) (Cofree t (Universe u t)) m where
-    unification (EnvT (_ /\ Arrow (a /\ b))) (EnvT (_ /\ Arrow (c /\ d))) = do
-      pure $ List.fromFoldable [(a /\ c), (b /\ d)]
+    unification (EnvT (ta /\ Arrow (a /\ b))) (EnvT (tb /\ Arrow (c /\ d))) = do
+      pure $ List.fromFoldable [(project ta /\ project tb), (a /\ c), (b /\ d)]
 else 
 instance
   ( Monad m
@@ -100,22 +101,22 @@ instance
 instance (Applicative m) => Elimination Arrow cat t m where
   elimination _ _ = pure Nothing
 
-unifyWithArrow :: forall u t m.
+unifyWithArrow :: forall var u t m.
                   MonadRec m
-               => Fresh m
+               => Fresh (var (Cofree t (Universe u t))) m 
                => Inject Hole t
                => Unification t t (Universe u t) (Cofree t (Universe u t)) m
                => Recursive (u (Cofree t)) (Cofree t)
                => Corecursive (u (Cofree t)) (Cofree t)
                => Inject Arrow t
-               => Inject Var t
+               => Inject var t
                => Traversable t
-               => Context Var (Universe u t) m 
-               => Universe u t -> m (Universe u t /\ Universe u t)
-unifyWithArrow t = do
-  a <- freshHole
-  b <- freshHole
-  c <- freshHole
+               => Subtext var (Universe u t) m 
+               => Proxy var -> Universe u t -> m (Universe u t /\ Universe u t)
+unifyWithArrow p t = do
+  a <- freshHole p
+  b <- freshHole p
+  c <- freshHole p
   unify (embed (c :< inj (Arrow (project a /\ project b))) :: Universe u t) t
-  Tuple <$> rewrite a <*> rewrite b
+  Tuple <$> rewrite p a <*> rewrite p b
 

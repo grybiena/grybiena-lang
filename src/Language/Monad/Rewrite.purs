@@ -1,39 +1,43 @@
 module Language.Monad.Rewrite where
 
-import Prelude
-
-import Control.Comonad.Cofree (Cofree, head, tail, (:<))
-import Data.Maybe (Maybe(..))
-import Data.Traversable (class Traversable, traverse)
-import Language.Category.Var (Var(..))
-import Language.Functor.Coproduct (class Inject, inj, prj)
-import Language.Functor.Universe (Universe)
-import Language.Monad.Context (class Context, replace)
-import Matryoshka (class Corecursive, class Recursive, embed, project)
-
-class Rewrite a m where
-  rewrite :: a -> m a
-
-instance
-  ( Inject Var t
-  , Recursive (u (Cofree t)) (Cofree t) 
-  , Corecursive (u (Cofree t)) (Cofree t) 
-  , Monad m
-  , Traversable t
-  , Context Var (Universe u t) m
-  ) => Rewrite (Universe u t) m where
-  rewrite t = do
-    let q :: t (Cofree t (Universe u t))
-        q = (tail $ project t)
-    case prj q of
-      Just (Var v) -> do
-        (r :: Var Void -> Maybe (Universe u t)) <- replace
-        case r (Var v) of
-          Nothing -> do
-            pure t 
-          Just so -> pure so
-      Nothing -> do
-         -- TODO rewrite the higher levels, terminating appropriately
-         (q' :: t (Cofree t (Universe u t))) <- map project <$> traverse (rewrite <<< embed) q
-         pure (embed (head (project t) :< q'))
-
+--import Prelude
+--
+--import Control.Comonad.Cofree (Cofree, head, tail, (:<))
+--import Data.Maybe (Maybe(..))
+--import Data.Traversable (class Traversable, traverse)
+--import Language.Functor.Coproduct (class Inject, prj)
+--import Language.Functor.Universe (Universe)
+--import Language.Monad.Context (class Context, class Variable, replace, variable)
+--import Matryoshka (class Corecursive, class Recursive, embed, project)
+--import Type.Proxy (Proxy(..))
+--
+--class Rewrite var a m where
+--  rewrite :: Proxy var -> a -> m a
+--
+--class Voidable var where
+--  void :: forall a. var a -> var Void
+--
+--instance
+--  ( Inject var t
+--  , Recursive (u (Cofree t)) (Cofree t) 
+--  , Corecursive (u (Cofree t)) (Cofree t) 
+--  , Monad m
+--  , Variable var
+--  , Traversable t
+--  , Context var (Universe u t) m
+--  ) => Rewrite var (Universe u t) m where
+--  rewrite _ t = do
+--    let q :: t (Cofree t (Universe u t))
+--        q = (tail $ project t)
+--    case prj q of
+--      Just v -> do
+--        (r :: var _ -> Maybe (Universe u t)) <- replace
+--        case r (variable v) of
+--          Nothing -> do
+--            pure t 
+--          Just so -> pure so
+--      Nothing -> do
+--         -- TODO rewrite the higher levels, terminating appropriately
+--         (q' :: t (Cofree t (Universe u t))) <- map project <$> traverse (rewrite (Proxy :: Proxy var)) (embed <$> q)
+--         pure (embed (head (project t) :< q'))
+--

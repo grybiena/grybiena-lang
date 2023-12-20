@@ -42,8 +42,8 @@ instance
   ( Monad m
   , Inject Hole t
   , Corecursive (u (Cofree t)) (Cofree t)
-  ) => Inference Hole t (Universe u t) m where
-    inference Hole = pure $ hole :< inj Hole 
+  ) => Inference var Hole t (Universe u t) m where
+    inference _ Hole = pure $ hole :< inj Hole 
 
 instance
   ( Monad m

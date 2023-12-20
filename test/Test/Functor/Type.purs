@@ -3,9 +3,10 @@ module Test.Functor.Type where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head)
+import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Except (runExceptT)
 import Control.Monad.Rec.Class (class MonadRec)
-import Control.Monad.State (runStateT)
+import Control.Monad.State (class MonadState, runStateT)
 import Data.Either (Either(..))
 import Data.FoldableWithIndex (traverseWithIndex_)
 import Data.Functor.Mu (Mu)
@@ -19,15 +20,17 @@ import Language.Category.Arrow (Arrow)
 import Language.Category.Forall (Forall)
 import Language.Category.Hole (Hole)
 import Language.Category.Level (Level)
-import Language.Category.Var (class Fresh, Var)
+import Language.Category.Var (Var)
 import Language.Functor.Coproduct (type (:+:))
 import Language.Functor.Elimination (class Eliminated)
 import Language.Functor.Parse (parser)
 import Language.Functor.Reduction (infer, reduce, reduceFix, reduceFixU)
 import Language.Functor.Universe (Universe, flatten)
-import Language.Monad.Context (class Context, Ctx(..), emptyCtx)
+import Language.Monad.Context (class Context, class Subtext, Ctx(..), emptyCtx)
+import Language.Monad.Fresh (class Fresh)
 import Matryoshka (embed, project)
 import Parsing (ParseError, runParserT)
+import Type.Proxy (Proxy(..))
 
 foofa :: Effect Unit
 foofa = do
@@ -35,7 +38,7 @@ foofa = do
   goo <- parseFoo "forall a . a b c"
   logShow goo
 
-  foo <- parseFoo "forall a . forall b . a b"
+  foo <- parseFoo "forall a . a a"
   logShow foo
   case foo of
     Left _ -> pure unit
@@ -62,7 +65,7 @@ showCtx (Ctx c) = do
         showSubstitution k v = log $ show k <> " ~> " <> show (flatten v)
 
 
-type Foo = (Var :+: Hole :+: Level :+: Arrow :+: Forall :+: App)
+type Foo = (Hole :+: Var :+: Level :+: Arrow :+: Forall Var :+: App)
 
 parseFoo :: forall m . MonadRec m => String -> m (Either ParseError (Mu Foo))
 parseFoo s = runParserT s (embed <$> parser)
@@ -72,9 +75,12 @@ parseFoo s = runParserT s (embed <$> parser)
 infero :: forall m.
           MonadRec m
        => Context Var (Universe Mu Foo) m 
-       => Fresh m
+       => Subtext Var (Universe Mu Foo) m 
+       => MonadState (Ctx Var (Universe Mu Foo)) m
+       => MonadThrow String m
+
        => Mu Foo -> m (Cofree Foo (Universe Mu Foo))
-infero = infer
+infero = infer (Proxy :: Proxy Var)
 
 --type Bar = Forall :+: App :+: Var
 
@@ -86,7 +92,6 @@ reduco = reduceFixU
 
 reduca :: forall m.
           MonadRec m
-       => Fresh m
        => Eliminated m
        => Universe Mu Foo -> m (Universe Mu Foo)
 reduca = map embed <<< reduco <<< project

@@ -15,23 +15,24 @@ import Language.Functor.Elimination (class Eliminated, class Elimination, elimin
 import Language.Functor.Inference (class Inference, inference)
 import Language.Functor.Universe (Universe)
 import Matryoshka (class Corecursive, class Recursive, cata, cataM, embed, project)
+import Type.Proxy (Proxy(..))
 
 class (Functor obj, Functor cat) <= Reduction obj f g cat m where
   reduction :: obj f -> m (cat g)
 
 instance 
-  ( Inference obj cat typ m
+  ( Inference var obj cat typ m
   , Functor obj
   , Functor cat
   ) => Reduction obj (m (Cofree cat typ)) typ (Cofree cat) m where
-  reduction = inference
+  reduction = inference (Proxy :: Proxy var)
 
 
-infer :: forall exp cat typ m.
-          Reduction cat (m (Cofree cat typ)) typ (Cofree cat) m
+infer :: forall var exp cat typ m.
+          Inference var cat cat typ m
        => Recursive exp cat
-       => exp -> m (Cofree cat typ) 
-infer = cata reduction 
+       => Proxy var -> exp -> m (Cofree cat typ) 
+infer p = cata (inference p) 
 
 instance 
   ( Monad m
