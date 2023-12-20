@@ -23,18 +23,17 @@ instance
   , Context Var (Universe u t) m
   ) => Rewrite (Universe u t) m where
   rewrite t = do
-    let q :: t (Universe u t)
-        q = embed <$> (tail $ project t)
+    let q :: t (Cofree t (Universe u t))
+        q = (tail $ project t)
     case prj q of
       Just (Var v) -> do
         (r :: Var Void -> Maybe (Universe u t)) <- replace
         case r (Var v) of
           Nothing -> do
-            h <- rewrite (head (project t))
-            pure (embed (h :< inj (Var v)))
+            pure t 
           Just so -> pure so
       Nothing -> do
-         h <- rewrite (head (project t))
-         r <- map project <$> traverse rewrite q
-         pure $ embed (h :< r)
+         -- TODO rewrite the higher levels, terminating appropriately
+         (q' :: t (Cofree t (Universe u t))) <- map project <$> traverse (rewrite <<< embed) q
+         pure (embed (head (project t) :< q'))
 

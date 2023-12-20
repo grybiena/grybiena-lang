@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Alt (class Alt)
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
+import Control.Monad.Rec.Class (class MonadRec)
 import Data.Foldable (class Foldable)
 import Data.List (List(..))
 import Data.List as List
@@ -11,6 +12,10 @@ import Data.Maybe (Maybe(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
+import Debug (traceM)
+import Language.Category.Arrow (Arrow, unifyWithArrow)
+import Language.Category.Hole (Hole)
+import Language.Category.Var (class Fresh, Var, freshHole)
 import Language.Functor.Application (class Application)
 import Language.Functor.Composition (class Composition, composition)
 import Language.Functor.Coproduct (class Inject, inj, prj)
@@ -19,6 +24,7 @@ import Language.Functor.Inference (class Inference)
 import Language.Functor.Parse (class Parse, class Postfix)
 import Language.Functor.Unification (class Unification, unification, unify)
 import Language.Functor.Universe (Universe)
+import Language.Monad.Context (class Context)
 import Language.Monad.Parser (class Parser)
 import Language.Monad.Rewrite (class Rewrite, rewrite)
 import Matryoshka (class Corecursive, class Recursive, embed, project)
@@ -47,23 +53,25 @@ instance Traversable App where
   sequence = traverse identity
 
 instance
-  ( Monad m
+  ( MonadRec m
   , Inject App cat 
   , Inject App t
-  , Unification t t (Cofree t (Universe u t)) Maybe
---  , Inference cat cat (Universe u t) m
---  , Unify (Universe u t) m
+  , Unification t t (Cofree t (Universe u t)) m 
+  , Fresh m
   , Functor t
   , Unification t t (Cofree t (Universe u t)) m
   , Recursive (u (Cofree t)) (Cofree t)
---  , Corecursive (u t) t
---  , Recursive (u t) t
+  , Inject Arrow t
+  , Inject Var t
+  , Inject Hole t
+  , Traversable t
+  , Context Var (Universe u t) m
+  , Corecursive (u (Cofree t)) (Cofree t)
   , Rewrite (Universe u t) m
   ) => Inference App cat (Universe u t) m where
     inference (App (inferF /\ inferA)) = do 
       (f :: Cofree cat (Universe u t)) <- inferF
       a <- inferA
-      let unifyWithArrow = unsafeCoerce unit
       arrArg /\ arrRet <- unifyWithArrow (head f)
       unify (arrArg) (head a)
       arrRet' <- rewrite arrRet
@@ -74,15 +82,6 @@ instance
   ) => Unification App App i m where 
     unification (App (a /\ b)) (App (c /\ d)) = pure $ List.fromFoldable [(a /\ c), (b /\ d)] 
 
-
---       case prj c of
---         Just (App (c /\ d)) -> do
---            pure unit
---            unify a c
-----            unify (project $ head a) (project $ head c)
-----            unify (project $ head b) (project $ head d)
---
---         Nothing -> unsafeCoerce unit
 else 
 instance
   ( Monad m

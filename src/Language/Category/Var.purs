@@ -3,7 +3,7 @@ module Language.Category.Var where
 import Prelude
 
 import Control.Alt (class Alt)
-import Control.Comonad.Cofree ((:<))
+import Control.Comonad.Cofree (Cofree, (:<))
 import Control.Monad.State (class MonadState, modify)
 import Control.Plus (class Plus, empty)
 import Data.Array as Array
@@ -17,6 +17,7 @@ import Data.Ord.Generic (genericCompare)
 import Data.String.CodePoints (codePointFromChar)
 import Data.String.CodeUnits (toCharArray)
 import Data.Traversable (class Traversable, traverse)
+import Language.Category.Hole (Hole, hole)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
@@ -25,6 +26,7 @@ import Language.Functor.Unification (class Unification)
 import Language.Functor.Universe (Universe)
 import Language.Monad.Context (class Context, class NotInScopeError, Ctx(..), require)
 import Language.Monad.Parser (class Parser, fail, identifier)
+import Matryoshka (class Corecursive, embed)
 
 newtype Var :: forall k. k -> Type
 newtype Var a = Var String
@@ -34,6 +36,18 @@ instance Show (Var a) where
 
 class Fresh m where
   fresh :: forall (a :: Type). m (Var a)
+
+freshHole :: forall u t m .
+             Monad m
+          => Inject Hole t
+          => Inject Var t
+          => Fresh m
+          => Corecursive (u (Cofree t)) (Cofree t)
+          => m (Universe u t)
+freshHole = do
+  t <- fresh
+  pure (embed ((hole :: Universe u t) :< inj t))
+
 
 class Counter c where
   increment :: c -> c
@@ -77,7 +91,11 @@ instance
 
  
 
-
+instance
+  ( Monad m
+  ) => Unification Var Var i m where
+    unification (Var a) (Var b) = pure Nil
+else
 instance
   ( Monad m
   ) => Unification Var a i m where

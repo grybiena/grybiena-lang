@@ -10,8 +10,8 @@ import Data.Maybe (Maybe(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Language.Category.Hole (Hole, hole)
-import Language.Category.Var (class Fresh, Var(..), fresh)
+import Language.Category.Hole (Hole)
+import Language.Category.Var (class Fresh, Var(..), freshHole)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
@@ -51,8 +51,8 @@ instance
   , Corecursive (u (Cofree t)) (Cofree t)
   ) => Inference Forall cat (Universe u t) m where
     inference (Forall (Var v /\ inferBody)) = do 
-      t <- fresh
-      assume (Var v) (embed ((hole :: Universe u t) :< inj t))
+      t <- freshHole
+      assume (Var v) (t :: Universe u t) 
       bod <- inferBody      
       pure (head bod :< inj (Forall (Var v /\ bod)))
 

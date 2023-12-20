@@ -3,16 +3,16 @@ module Language.Functor.Unification where
 import Prelude
 
 import Control.Comonad.Cofree (Cofree, head, tail)
-import Data.Functor.Mu (Mu)
+import Control.Monad.Rec.Class (class MonadRec, Step(..), tailRecM)
 import Data.List (List(..))
-import Data.Maybe (Maybe)
+import Data.List as List
 import Data.Traversable (traverse)
 import Data.Tuple (uncurry)
 import Data.Tuple.Nested (type (/\), (/\))
+import Debug (traceM)
 import Language.Functor.Coproduct (type (:+:), Coproduct(..))
-import Language.Functor.Universe (Universe, flatten)
-import Matryoshka (class Corecursive, class Recursive, project)
-import Unsafe.Coerce (unsafeCoerce)
+import Language.Functor.Universe (Universe)
+import Matryoshka (class Recursive, project)
 
 class Unification l r i m where
   unification :: l i -> r i -> m (List (i /\ i)) 
@@ -41,20 +41,19 @@ unify' x y = void (unifier x y)
 
 unify :: forall u t m.
          Unification t t (Cofree t (Universe u t)) m
-      => Monad m
+      => MonadRec m
       => Recursive (u (Cofree t)) (Cofree t) 
       => Universe u t -> Universe u t -> m Unit
 unify x y = do
   let a = project x
       b = project y
-  l <- unifier (tail a) (tail b)
-  case l of
-    Nil -> pure unit
-    _ -> unify (head a) (head b)
+  tailRecM go (List.fromFoldable [a /\ b])
+  -- TODO unify the higher levels, terminating appropriately
   where
-    unifier :: t (Cofree t (Universe u t)) -> t (Cofree t (Universe u t)) -> m (List (Cofree t (Universe u t)))
-    unifier a b = do
-       join <$> (unification a b >>= (traverse (uncurry unifier) <<< map (\(f /\ g) -> tail f /\ tail g)))
+    go :: List (Cofree t (Universe u t) /\ Cofree t (Universe u t))
+       -> m (Step (List (Cofree t (Universe u t) /\ Cofree t (Universe u t))) Unit)
+    go Nil = pure $ Done unit
+    go l = Loop <<< join <$> ((traverse (uncurry unification) <<< map (\(f /\ g) -> tail f /\ tail g)) l)
 
 
 
