@@ -5,12 +5,15 @@ import Prelude
 import Control.Comonad.Cofree (Cofree, head, (:<))
 import Data.Functor.Mu (Mu(..))
 import Data.Generic.Rep (class Generic)
+import Data.List (List(..))
+import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Category.App (App(..))
 import Language.Category.Level (Level, toInfinity)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Inference (class Inference)
+import Language.Functor.Unification (class Unification)
 import Language.Functor.Universe (Universe, ascend)
 import Language.Lambda.Unification (class Unify, unify)
 import Matryoshka (class Corecursive)
@@ -51,7 +54,10 @@ instance
        unify (toInfinity 1 :: Universe u typ) (head a)
        b <- inferB
        unify (toInfinity 1 :: Universe u typ) (head b)
+       --
        pure $ toInfinity 1 :< inj (Arrow (a /\ b))
 
+instance (Applicative m) => Unification Arrow Arrow i m where
+    unification _ _ = pure Nil
 
  

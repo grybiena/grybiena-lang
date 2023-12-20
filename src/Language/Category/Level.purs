@@ -4,10 +4,12 @@ import Prelude
 
 import Control.Comonad.Cofree (Cofree, deferCofree, (:<))
 import Data.Generic.Rep (class Generic)
+import Data.List (List(..))
 import Data.Show.Generic (genericShow)
 import Data.Tuple.Nested ((/\))
-import Language.Functor.Inference (class Inference)
 import Language.Functor.Coproduct (class Inject, inj)
+import Language.Functor.Inference (class Inference)
+import Language.Functor.Unification (class Unification)
 import Language.Functor.Universe (Universe)
 import Matryoshka (class Corecursive, embed)
 
@@ -28,6 +30,11 @@ instance
   , Corecursive (u (Cofree t)) (Cofree t)
   ) => Inference Level t (Universe u t) m where
     inference (Level i) = pure $ (toInfinity (i+1)) :< inj (Level i) 
+
+instance
+  ( Monad m
+  ) => Unification Level Level i m where
+    unification (Level i) t = pure Nil 
 
 toInfinity :: forall u t. Inject Level t => Corecursive (u (Cofree t)) (Cofree t) => Int -> Universe u t 
 toInfinity i = embed (deferCofree (\_ -> (toInfinity (i+1) /\ inj (Level i))))

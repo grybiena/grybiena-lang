@@ -6,13 +6,15 @@ import Control.Alt (class Alt)
 import Control.Comonad.Cofree (Cofree, deferCofree, (:<))
 import Control.Plus (class Plus, empty)
 import Data.Foldable (class Foldable)
+import Data.List (List(..))
+import Data.Maybe (Maybe(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple.Nested ((/\))
-import Language.Category.Var (class Fresh, Var, fresh)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
 import Language.Functor.Parse (class Parse, class Postfix)
+import Language.Functor.Unification (class Unification)
 import Language.Functor.Universe (Universe)
 import Language.Monad.Parser (class Parser, reserved)
 import Matryoshka (class Corecursive, embed)
@@ -43,18 +45,33 @@ instance
   ) => Inference Hole t (Universe u t) m where
     inference Hole = pure $ hole :< inj Hole 
 
+instance
+  ( Monad m
+  ) => Unification Hole Hole i m where
+    unification Hole _ = pure Nil 
+else
+instance
+  ( Monad m
+  ) => Unification Hole a i m where
+    unification Hole _ = pure Nil 
+else
+instance
+  ( Monad m
+  ) => Unification a Hole i m where
+    unification _ _ = pure Nil
+
+
+
+
 hole :: forall u t . Inject Hole t => Corecursive (u (Cofree t)) (Cofree t) => Universe u t
 hole = embed (deferCofree (\_ -> (hole /\ inj Hole)))
 
 instance
   ( Monad m
-  , Fresh m
-  , Inject Var typ
   ) => Elimination Hole typ f m where
-    elimination Hole t = do
-       v <- fresh
-       pure $ t :< inj v
+    elimination Hole _ = pure Nothing
 
+ 
 
 instance
   ( Plus p

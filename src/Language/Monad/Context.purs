@@ -36,7 +36,7 @@ instance
      pure (flip getEnv e)
 
 
-newtype Ctx var typ = Ctx { ctx :: Map (var Void) typ, count :: Int }
+newtype Ctx var typ = Ctx { ctx :: Map (var Void) typ, count :: Int, eliminations :: Int }
 
 instance
   ( Ord (var Void)
@@ -45,5 +45,5 @@ instance
   getEnv v (Ctx c) = Map.lookup v c.ctx
 
 emptyCtx :: forall var typ . Ctx var typ
-emptyCtx = Ctx { ctx: Map.empty, count: 0 }
+emptyCtx = Ctx { ctx: Map.empty, count: 0, eliminations: 0 }
 

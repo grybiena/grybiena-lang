@@ -1,12 +1,11 @@
 module Language.Functor.Inference where
 
-import Prelude
-
 import Control.Comonad.Cofree (Cofree)
 import Language.Functor.Coproduct (type (:+:), Coproduct(..))
 
-class (Functor obj, Functor cat) <= Inference obj cat typ m where
+class Inference obj cat typ m where
   inference :: obj (m (Cofree cat typ)) -> m (Cofree cat typ)
+
 
 
 instance
@@ -15,5 +14,4 @@ instance
   ) => Inference (a :+: b) cat typ m where
     inference (Inl a) = inference a
     inference (Inr b) = inference b
-
 

@@ -2,10 +2,9 @@ module Language.Category.Opaque where
 
 import Prelude
 
-import Control.Comonad.Cofree ((:<))
+import Data.Maybe (Maybe(..))
+import Language.Functor.Coproduct (class Inject)
 import Language.Functor.Elimination (class Elimination)
-import Language.Functor.Coproduct (class Inject, inj)
-import Unsafe.Coerce (unsafeCoerce)
 
 
 newtype Opaque :: forall k. k -> Type
@@ -18,6 +17,6 @@ instance
   ( Monad m
   , Inject Opaque cat
   ) => Elimination Opaque cat typ m where
-    elimination (Opaque { term }) t = pure $ t :< inj (Opaque (unsafeCoerce term))
+    elimination _ _ = pure Nothing 
 
 

@@ -5,15 +5,18 @@ import Prelude
 import Control.Comonad.Cofree (Cofree, head, (:<))
 import Control.Plus (class Plus, empty)
 import Data.Foldable (class Foldable)
+import Data.List (List(..))
+import Data.Maybe (Maybe(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
 import Language.Category.Hole (Hole, hole)
-import Language.Category.Var (Var(..))
+import Language.Category.Var (class Fresh, Var(..), fresh)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
 import Language.Functor.Parse (class Parse, class Postfix, parseable)
+import Language.Functor.Unification (class Unification)
 import Language.Functor.Universe (Universe)
 import Language.Monad.Context (class Context, assume)
 import Language.Monad.Parser (class Parser, reserved, reservedOp)
@@ -40,21 +43,39 @@ instance Traversable Forall where
 
 instance
   ( Monad m
+  , Fresh m
   , Context Var (Universe u t) m
   , Inject Forall cat 
   , Inject Hole t
+  , Inject Var t
   , Corecursive (u (Cofree t)) (Cofree t)
   ) => Inference Forall cat (Universe u t) m where
     inference (Forall (Var v /\ inferBody)) = do 
-      assume (Var v) (hole :: Universe u t) 
+      t <- fresh
+      assume (Var v) (embed ((hole :: Universe u t) :< inj t))
       bod <- inferBody      
       pure (head bod :< inj (Forall (Var v /\ bod)))
+
+instance
+  ( Monad m
+  ) => Unification Forall Forall i m where
+    unification (Forall _) _ = pure Nil 
+else
+instance
+  ( Monad m
+  ) => Unification Forall a i m where
+    unification (Forall _) _ = pure Nil 
+
 
 instance 
   ( Monad m
   , Inject Forall cat
   ) => Elimination Forall cat typ m where
-    elimination v t = pure (t :< inj v)
+    elimination _ _ = pure Nothing 
+
+
+
+ 
 
 instance
   ( Plus p

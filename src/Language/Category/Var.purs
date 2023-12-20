@@ -11,6 +11,7 @@ import Data.CodePoint.Unicode (isUpper)
 import Data.Eq.Generic (genericEq)
 import Data.Foldable (class Foldable)
 import Data.Generic.Rep (class Generic)
+import Data.List (List(..))
 import Data.Maybe (Maybe(..))
 import Data.Ord.Generic (genericCompare)
 import Data.String.CodePoints (codePointFromChar)
@@ -20,6 +21,7 @@ import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
 import Language.Functor.Parse (class Parse, class Postfix)
+import Language.Functor.Unification (class Unification)
 import Language.Functor.Universe (Universe)
 import Language.Monad.Context (class Context, class NotInScopeError, Ctx(..), require)
 import Language.Monad.Parser (class Parser, fail, identifier)
@@ -73,11 +75,28 @@ instance
   ) => Inference Var cat (Universe u typ) m where
     inference (Var v) = require (Var v) >>= \t -> pure (t :< inj (Var v)) 
 
+ 
+
+
+instance
+  ( Monad m
+  ) => Unification Var a i m where
+    unification _ _ = pure Nil 
+else
+instance
+  ( Monad m
+  ) => Unification a Var i m where
+    unification _ _ = pure Nil 
+
+
+
+
+
 instance 
   ( Monad m
   , Inject Var cat
   ) => Elimination Var cat typ m where
-    elimination v t = pure (t :< inj v)
+    elimination _ _ = pure Nothing 
 
 
 instance

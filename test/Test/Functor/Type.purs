@@ -17,8 +17,9 @@ import Language.Category.Forall (Forall)
 import Language.Category.Hole (Hole)
 import Language.Category.Var (class Fresh, Var)
 import Language.Functor.Coproduct (type (:+:))
+import Language.Functor.Elimination (class Eliminated)
 import Language.Functor.Parse (parser)
-import Language.Functor.Reduction (infer, reduce)
+import Language.Functor.Reduction (infer, reduce, reduceFix, reduceFixU)
 import Language.Functor.Universe (Universe, flatten)
 import Language.Monad.Context (class Context, Ctx, emptyCtx)
 import Matryoshka (embed, project)
@@ -47,9 +48,9 @@ foofa = do
   pure unit
 
 
-type Foo = (Hole :+: Forall :+: App :+: Var)
+type Foo = (Var :+: Hole :+: Forall :+: App)
 
-parseFoo :: forall m . MonadRec m => String -> m (Either ParseError (Mu Bar))
+parseFoo :: forall m . MonadRec m => String -> m (Either ParseError (Mu Foo))
 parseFoo s = runParserT s (embed <$> parser)
 
 
@@ -57,20 +58,22 @@ parseFoo s = runParserT s (embed <$> parser)
 infero :: forall m.
           Monad m
        => Context Var (Universe Mu Foo) m 
-       => Mu Bar -> m (Cofree Bar (Universe Mu Foo))
+       => Fresh m
+       => Mu Foo -> m (Cofree Foo (Universe Mu Foo))
 infero = infer
 
-type Bar = Forall :+: App :+: Var
+--type Bar = Forall :+: App :+: Var
 
 reduco :: forall m.
-          Monad m
-       => Fresh m
+          MonadRec m
+       => Eliminated m 
        => Cofree Foo (Universe Mu Foo) -> m (Cofree Foo (Universe Mu Foo))
-reduco = reduce
+reduco = reduceFixU
 
 reduca :: forall m.
-          Monad m
+          MonadRec m
        => Fresh m
+       => Eliminated m
        => Universe Mu Foo -> m (Universe Mu Foo)
 reduca = map embed <<< reduco <<< project
 

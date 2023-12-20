@@ -4,11 +4,12 @@ import Prelude
 
 import Control.Comonad.Cofree ((:<))
 import Data.Generic.Rep (class Generic)
+import Data.Maybe (Maybe(..))
 import Data.Show.Generic (genericShow)
 import Language.Category.Opaque (Opaque(..))
 import Language.Functor.Coproduct (class Inject, inj)
-import Unsafe.Coerce (unsafeCoerce)
 import Language.Functor.Elimination (class Elimination)
+import Unsafe.Coerce (unsafeCoerce)
 
 data Basis :: forall k. k -> Type
 data Basis a = S | K | I | B | C
@@ -44,6 +45,6 @@ instance
   ( Monad m
   , Inject Opaque cat 
   ) => Elimination Basis cat typ m where
-    elimination b t = pure $ t :< inj (nativePretty b)
+    elimination b t = pure $ Just $ t :< inj (nativePretty b)
 
 

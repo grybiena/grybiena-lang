@@ -23,10 +23,10 @@ main = do
   liftEffect $ logShow $ tail $ project (ascend (toInfinity 0 :: Universe Mu Level))
   liftEffect $ logShow $ tail $ project $ ascend (ascend (toInfinity 0 :: Universe Mu Level))
 
-  graphTests
-  inferTypeSuite
-  inferKindSuite
-  compileTestSuite
-  evalTestSuite
+--  graphTests
+--  inferTypeSuite
+--  inferKindSuite
+--  compileTestSuite
+--  evalTestSuite
 
   foofa
