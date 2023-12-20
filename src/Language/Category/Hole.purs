@@ -47,17 +47,17 @@ instance
 
 instance
   ( Monad m
-  ) => Unification Hole Hole i m where
-    unification Hole _ = pure Nil 
+  ) => Unification Hole Hole t i m where
+    unification _ _ = pure Nil 
 else
 instance
   ( Monad m
-  ) => Unification Hole a i m where
-    unification Hole _ = pure Nil 
+  ) => Unification Hole a t i m where
+    unification _ _ = pure Nil 
 else
 instance
   ( Monad m
-  ) => Unification a Hole i m where
+  ) => Unification a Hole t i m where
     unification _ _ = pure Nil
 
 

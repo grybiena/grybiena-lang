@@ -54,8 +54,13 @@ foofa = do
   pure unit
 
 showCtx :: Ctx Var (Universe Mu Foo) -> Effect Unit
-showCtx (Ctx c) = traverseWithIndex_ showAssumption c.ctx
+showCtx (Ctx c) = do
+  traverseWithIndex_ showAssumption c.assumptions
+  traverseWithIndex_ showSubstitution c.substitutions
+
   where showAssumption k v = log $ show k <> " :: " <> show (flatten v)
+        showSubstitution k v = log $ show k <> " ~> " <> show (flatten v)
+
 
 type Foo = (Var :+: Hole :+: Level :+: Arrow :+: Forall :+: App)
 

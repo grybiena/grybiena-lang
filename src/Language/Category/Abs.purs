@@ -41,7 +41,7 @@ instance
 
 instance
   ( Monad m
-  ) => Unification (Abs app) (Abs app) i m where
+  ) => Unification (Abs app) (Abs app) t i m where
     unification _ _ = pure Nil 
 
 

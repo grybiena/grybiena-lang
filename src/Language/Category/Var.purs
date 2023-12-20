@@ -4,6 +4,8 @@ import Prelude
 
 import Control.Alt (class Alt)
 import Control.Comonad.Cofree (Cofree, (:<))
+import Control.Comonad.Env (EnvT(..))
+import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.State (class MonadState, modify)
 import Control.Plus (class Plus, empty)
 import Data.Array as Array
@@ -17,16 +19,17 @@ import Data.Ord.Generic (genericCompare)
 import Data.String.CodePoints (codePointFromChar)
 import Data.String.CodeUnits (toCharArray)
 import Data.Traversable (class Traversable, traverse)
+import Data.Tuple.Nested ((/\))
 import Language.Category.Hole (Hole, hole)
 import Language.Functor.Coproduct (class Inject, inj)
 import Language.Functor.Elimination (class Elimination)
 import Language.Functor.Inference (class Inference)
 import Language.Functor.Parse (class Parse, class Postfix)
-import Language.Functor.Unification (class Unification)
+import Language.Functor.Unification (class Unification, unify)
 import Language.Functor.Universe (Universe)
-import Language.Monad.Context (class Context, class NotInScopeError, Ctx(..), require)
+import Language.Monad.Context (class Context, class NotInScopeError, Ctx(..), assume, require, substitute)
 import Language.Monad.Parser (class Parser, fail, identifier)
-import Matryoshka (class Corecursive, embed)
+import Matryoshka (class Corecursive, class Recursive, embed)
 
 newtype Var :: forall k. k -> Type
 newtype Var a = Var String
@@ -93,18 +96,34 @@ instance
 
 instance
   ( Monad m
-  ) => Unification Var Var i m where
-    unification (Var a) (Var b) = pure Nil
+  , Context Var (Universe u t) m
+  , Corecursive (u (Cofree t)) (Cofree t)
+  , Inject Var t
+  ) => Unification Var Var (Universe u t) (Cofree t (Universe u t)) m where
+    unification (EnvT (_ /\ (Var v))) (EnvT (tt /\ (Var w))) = do
+       when (v /= w) do
+         substitute (Var v) (embed (tt :< inj (Var w)))
+       pure Nil 
 else
 instance
   ( Monad m
-  ) => Unification Var a i m where
-    unification _ _ = pure Nil 
+  , Context Var (Universe u t) m
+  , Corecursive (u (Cofree t)) (Cofree t)
+  , Inject q t
+  ) => Unification Var q (Universe u t) (Cofree t (Universe u t)) m where
+    unification (EnvT (_ /\ (Var v))) (EnvT (tt /\ t)) = do
+       substitute (Var v) (embed (tt :< inj t))
+       pure Nil 
 else
 instance
   ( Monad m
-  ) => Unification a Var i m where
-    unification _ _ = pure Nil 
+  , Context Var (Universe u t) m
+  , Corecursive (u (Cofree t)) (Cofree t)
+  , Inject q t
+  ) => Unification q Var (Universe u t) (Cofree t (Universe u t)) m where
+    unification (EnvT (tt /\ t)) (EnvT (_ /\ (Var v))) = do
+       substitute (Var v) (embed (tt :< inj t))
+       pure Nil 
 
 
 

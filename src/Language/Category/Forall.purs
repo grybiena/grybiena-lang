@@ -58,13 +58,13 @@ instance
 
 instance
   ( Monad m
-  ) => Unification Forall Forall i m where
-    unification (Forall _) _ = pure Nil 
+  ) => Unification Forall Forall t i m where
+    unification _ _ = pure Nil 
 else
 instance
   ( Monad m
-  ) => Unification Forall a i m where
-    unification (Forall _) _ = pure Nil 
+  ) => Unification Forall a t i m where
+    unification _ _ = pure Nil 
 
 
 instance 

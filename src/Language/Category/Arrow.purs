@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Alt (class Alt)
 import Control.Comonad.Cofree (Cofree, head, (:<))
+import Control.Comonad.Env (EnvT(..))
 import Control.Monad.Rec.Class (class MonadRec)
 import Data.Foldable (class Foldable)
 import Data.Generic.Rep (class Generic)
@@ -14,7 +15,6 @@ import Data.Show.Generic (genericShow)
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(..))
 import Data.Tuple.Nested (type (/\), (/\))
-import Debug (traceM)
 import Language.Category.Hole (Hole)
 import Language.Category.Level (Level, toInfinity)
 import Language.Category.Var (class Fresh, Var, freshHole)
@@ -68,7 +68,7 @@ instance
   ( MonadRec m 
   , Inject Arrow typ 
   , Inject Level typ
-  , Unification typ typ (Cofree typ (Universe u typ)) m
+  , Unification typ typ (Universe u typ) (Cofree typ (Universe u typ)) m
   , Corecursive (u (Cofree typ)) (Cofree typ)
   , Recursive (u (Cofree typ)) (Cofree typ)
   ) => Inference Arrow typ (Universe u typ) m where
@@ -80,17 +80,20 @@ instance
        -- TODO take the max level of a /\ b
        pure $ toInfinity 1 :< inj (Arrow (a /\ b))
 
-instance (Applicative m) => Unification Arrow Arrow i m where
-    unification (Arrow (a /\ b)) (Arrow (c /\ d)) = pure $ List.fromFoldable [(a /\ c), (c /\ d)]
+instance
+  ( Monad m
+  ) => Unification Arrow Arrow (Universe u t) (Cofree t (Universe u t)) m where
+    unification (EnvT (_ /\ Arrow (a /\ b))) (EnvT (_ /\ Arrow (c /\ d))) = do
+      pure $ List.fromFoldable [(a /\ c), (b /\ d)]
 else 
 instance
   ( Monad m
-  ) => Unification a Arrow i m where
+  ) => Unification a Arrow t i m where
     unification _ _ = pure Nil
 else 
 instance
   ( Monad m
-  ) => Unification Arrow a i m where
+  ) => Unification Arrow a t i m where
     unification _ _ = pure Nil
 
 
@@ -101,7 +104,7 @@ unifyWithArrow :: forall u t m.
                   MonadRec m
                => Fresh m
                => Inject Hole t
-               => Unification t t (Cofree t (Universe u t)) m
+               => Unification t t (Universe u t) (Cofree t (Universe u t)) m
                => Recursive (u (Cofree t)) (Cofree t)
                => Corecursive (u (Cofree t)) (Cofree t)
                => Inject Arrow t

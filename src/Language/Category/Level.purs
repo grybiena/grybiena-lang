@@ -70,17 +70,17 @@ toInfinity i = embed (deferCofree (\_ -> (toInfinity (i+1) /\ inj (Level i))))
 
 instance
   ( Monad m
-  ) => Unification Level Level i m where
-    unification (Level i) t = pure Nil 
+  ) => Unification Level Level t i m where
+    unification _ _ = pure Nil 
 else 
 instance
   ( Monad m
-  ) => Unification a Level i m where
+  ) => Unification a Level t i m where
     unification _ _ = pure Nil
 else 
 instance
   ( Monad m
-  ) => Unification Level a i m where
+  ) => Unification Level a t i m where
     unification _ _ = pure Nil
 
 

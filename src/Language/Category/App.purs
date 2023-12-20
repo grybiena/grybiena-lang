@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Alt (class Alt)
 import Control.Comonad.Cofree (Cofree, head, tail, (:<))
+import Control.Comonad.Env (EnvT(..))
 import Control.Monad.Rec.Class (class MonadRec)
 import Data.Foldable (class Foldable)
 import Data.List (List(..))
@@ -56,10 +57,9 @@ instance
   ( MonadRec m
   , Inject App cat 
   , Inject App t
-  , Unification t t (Cofree t (Universe u t)) m 
+  , Unification t t (Universe u t) (Cofree t (Universe u t)) m 
   , Fresh m
   , Functor t
-  , Unification t t (Cofree t (Universe u t)) m
   , Recursive (u (Cofree t)) (Cofree t)
   , Inject Arrow t
   , Inject Var t
@@ -79,14 +79,15 @@ instance
 
 instance
   ( Monad m
-  ) => Unification App App i m where 
-    unification (App (a /\ b)) (App (c /\ d)) = pure $ List.fromFoldable [(a /\ c), (b /\ d)] 
+  ) => Unification App App (Universe u t) (Cofree t (Universe u t)) m where 
+    unification (EnvT (_ /\ App (a /\ b))) (EnvT (_ /\ App (c /\ d))) = do
+       pure $ List.fromFoldable [(a /\ c), (b /\ d)] 
 
 else 
 instance
   ( Monad m
-  ) => Unification App a i m where
-    unification (App (a /\ b)) c = pure Nil
+  ) => Unification App a t i m where
+    unification _ _ = pure Nil
 
 instance
   ( Monad m
