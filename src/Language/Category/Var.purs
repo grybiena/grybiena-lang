@@ -24,10 +24,11 @@ import Language.Functor.Inference (class Inference)
 import Language.Functor.Parse (class Parse, class Postfix)
 import Language.Functor.Unification (class Unification)
 import Language.Functor.Universe (Universe)
-import Language.Monad.Context (class Context, class NotInScopeError, class Subtext, class Variable, require, substitute)
+import Language.Monad.Context (class Context, class NotInScopeError, class Subtext, class Variable, require, rewrite, substitute)
 import Language.Monad.Fresh (class Indexable)
 import Language.Monad.Parser (class Parser, fail, identifier)
 import Matryoshka (class Corecursive, class Recursive, embed, project)
+import Type.Proxy (Proxy(..))
 
 newtype Var :: forall k. k -> Type
 newtype Var a = Var String
@@ -73,10 +74,13 @@ instance
   , Corecursive (u (Cofree t)) (Cofree t)
   , Recursive (u (Cofree t)) (Cofree t)
   , Inject Var t
+  , Traversable t
   ) => Unification Var Var (Universe u t) (Cofree t (Universe u t)) m where
     unification (EnvT (ta /\ (Var v))) (EnvT (tt /\ (Var w))) = do
        when (v /= w) do
-         substitute (Var v) (embed (tt :< inj (Var w)))
+         t <- rewrite (Proxy :: Proxy Var) (embed (tt :< inj (Var w))) 
+         -- TODO check v not free in z
+         substitute (Var v) t
        pure $ List.singleton (project ta /\ project tt) 
 else
 instance
@@ -85,9 +89,13 @@ instance
   , Corecursive (u (Cofree t)) (Cofree t)
   , Recursive (u (Cofree t)) (Cofree t)
   , Inject q t
+  , Inject Var t
+  , Traversable t
   ) => Unification Var q (Universe u t) (Cofree t (Universe u t)) m where
     unification (EnvT (ta /\ (Var v))) (EnvT (tt /\ t)) = do
-       substitute (Var v) (embed (tt :< inj t))
+       z <- rewrite (Proxy :: Proxy Var) (embed (tt :< inj t)) 
+       -- TODO check v not free in z
+       substitute (Var v) z
        pure $ List.singleton (project ta /\ project tt) 
 else
 instance
@@ -96,9 +104,13 @@ instance
   , Corecursive (u (Cofree t)) (Cofree t)
   , Recursive (u (Cofree t)) (Cofree t)
   , Inject q t
+  , Inject Var t
+  , Traversable t
   ) => Unification q Var (Universe u t) (Cofree t (Universe u t)) m where
     unification (EnvT (ta /\ t)) (EnvT (tt /\ (Var v))) = do
-       substitute (Var v) (embed (ta :< inj t))
+       z <- rewrite (Proxy :: Proxy Var) (embed (ta :< inj t)) 
+       -- TODO check v not free in z
+       substitute (Var v) z
        pure $ List.singleton (project ta /\ project tt) 
 
 instance Variable Var where
